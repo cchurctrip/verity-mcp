@@ -7,13 +7,18 @@ import { describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
 
 describe('GET /health', () => {
-  it('returns 200 with status ok and uptime_s', async () => {
+  // /health MUST stay reachable when MCP_KILL_SWITCH is engaged so on-call
+  // can distinguish operator-disabled from service-crashed states. The
+  // kill_switch_engaged flag surfaces the disabled state to the smoke cron.
+  it('returns 200 with status ok, uptime_s, and kill_switch_engaged', async () => {
     const res = await SELF.fetch('http://example.com/health');
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body['status']).toBe('ok');
     expect(typeof body['uptime_s']).toBe('number');
     expect(typeof body['commit']).toBe('string');
+    expect(typeof body['kill_switch_engaged']).toBe('boolean');
+    expect(body['kill_switch_engaged']).toBe(false);
   });
 });
 

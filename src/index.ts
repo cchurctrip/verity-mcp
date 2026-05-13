@@ -21,6 +21,30 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
+    // OPTIONS preflight is independent of the kill switch (browsers must
+    // resolve CORS before sending the real request that would hit it).
+    if (req.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    // /health is the synthetic-smoke target. It MUST stay reachable when the
+    // kill switch is engaged so on-call can distinguish "operator-disabled
+    // (kill_switch_engaged: true)" from "service crashed (no response)".
+    // The smoke cron reads kill_switch_engaged and records status=skipped
+    // when true instead of paging Sentry.
+    if (req.method === 'GET' && url.pathname === '/health') {
+      const killSwitchEngaged = env.MCP_KILL_SWITCH === 'on';
+      return jsonResponse(
+        {
+          status: 'ok',
+          commit: env.COMMIT_SHA ?? 'unknown',
+          uptime_s: Math.floor((Date.now() - BOOT_TIME_MS) / 1000),
+          kill_switch_engaged: killSwitchEngaged,
+        },
+        200,
+      );
+    }
+
     if (env.MCP_KILL_SWITCH === 'on') {
       return jsonResponse(
         {
@@ -33,21 +57,6 @@ export default {
           },
         },
         503,
-      );
-    }
-
-    if (req.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
-
-    if (req.method === 'GET' && url.pathname === '/health') {
-      return jsonResponse(
-        {
-          status: 'ok',
-          commit: env.COMMIT_SHA ?? 'unknown',
-          uptime_s: Math.floor((Date.now() - BOOT_TIME_MS) / 1000),
-        },
-        200,
       );
     }
 
@@ -70,14 +79,16 @@ export default {
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
-      // Phase 2 will implement initialize, tools/list, tools/call dispatch.
+      // Method dispatch (initialize, tools/list, tools/call) lands in the
+      // next scaffold iteration. Until then the endpoint advertises itself
+      // as not-yet-operational via the standard JSON-RPC method-not-found code.
       return jsonResponse(
         {
           jsonrpc: '2.0',
           id: null,
           error: {
             code: -32601,
-            message: 'Method dispatch not yet implemented (VRT-146a Phase 2)',
+            message: 'Method dispatch not yet operational',
           },
         },
         501,
