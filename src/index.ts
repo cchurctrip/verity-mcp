@@ -9,7 +9,13 @@ export interface Env {
   COMMIT_SHA?: string;
 }
 
-const BOOT_TIME_MS = Date.now();
+// Cloudflare Workers production runtime returns 0 from Date.now() at module
+// scope (Spectre mitigation; Date.now() only returns a real time after some
+// I/O has happened). workerd locally returns the real time and hides this.
+// Initialize lazily on the first request so uptime_s is computed correctly
+// in production. First request sees uptime_s = 0; subsequent requests on the
+// same isolate see real positive uptime.
+let bootTimeMs: number | null = null;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -19,6 +25,11 @@ const CORS_HEADERS = {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    // Lazy boot-time initialization. See comment near declaration: Date.now()
+    // returns 0 at module scope in production but the real time inside a
+    // request handler. Capturing on first request gives correct uptime math.
+    bootTimeMs ??= Date.now();
+
     const url = new URL(req.url);
 
     // OPTIONS preflight is independent of the kill switch (browsers must
@@ -38,7 +49,7 @@ export default {
         {
           status: 'ok',
           commit: env.COMMIT_SHA ?? 'unknown',
-          uptime_s: Math.floor((Date.now() - BOOT_TIME_MS) / 1000),
+          uptime_s: Math.floor((Date.now() - bootTimeMs) / 1000),
           kill_switch_engaged: killSwitchEngaged,
         },
         200,
