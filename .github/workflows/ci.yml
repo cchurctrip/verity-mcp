@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Lint · Typecheck · Test · Wrangler dry-run · Manifest schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Wrangler deploy --dry-run
+        env:
+          # Wrangler dry-run does not require real credentials. The env var
+          # below is set as a non-empty placeholder so wrangler skips the
+          # interactive auth check during CI. Real deploys use Workflow secrets.
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || 'dryrun' }}
+        run: npx wrangler deploy --dry-run --env preview
+
+      - name: Manifest schema check
+        run: bash scripts/check-manifest-schema.sh

@@ -1,0 +1,53 @@
+{
+  "name": "verity-mcp",
+  "version": "1.0.0",
+  "description": "Coordination, market integrity, and disinformation signals for AI agents.",
+  "publisher": "Verity",
+  "publisher_url": "https://verityskills.com",
+  "server_url": "https://mcp.verityskills.com/mcp",
+  "transport": "http+sse",
+  "mcp_spec_version": "2025-03-26",
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization",
+    "value_format": "Bearer <vtk_token>",
+    "obtain_url": "https://verityskills.com/account/api-keys",
+    "anonymous_tools": ["coordination-heat"]
+  },
+  "tools": [
+    {
+      "name": "coordination-heat",
+      "description": "Detect coordinated activity around a topic, ticker, or narrative.",
+      "requires_auth": false
+    },
+    {
+      "name": "verity-score",
+      "description": "Composite integrity signal for a market subject.",
+      "requires_auth": true
+    },
+    {
+      "name": "morning-brief",
+      "description": "Daily briefing of market-relevant signals.",
+      "requires_auth": true
+    },
+    {
+      "name": "verity-scan",
+      "description": "Real-time scan of a topic, ticker, or claim.",
+      "requires_auth": true
+    },
+    {
+      "name": "cross-check-alert",
+      "description": "Cross-reference a claim against authoritative sources.",
+      "requires_auth": true
+    },
+    {
+      "name": "disinfo-alert",
+      "description": "Flag potential disinformation patterns and coordinated narratives.",
+      "requires_auth": true
+    }
+  ],
+  "marketing_categories": ["finance", "research", "data"],
+  "license": "MIT",
+  "support_url": "https://verityskills.com/support",
+  "privacy_policy_url": "https://verityskills.com/privacy"
+}

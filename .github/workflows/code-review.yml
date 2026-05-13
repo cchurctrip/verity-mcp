@@ -1,0 +1,40 @@
+name: code-review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: code-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codex-review:
+    name: Codex Code Review (gpt-5.5)
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Codex CI review placeholder
+        # VRT-146a Phase 1 scaffold. Full Codex CI implementation ports from
+        # cchurctrip/gatekeeper-ai PR #280 once that lands and the port is
+        # filed as a Verity follow-up issue. Until then, this workflow is a
+        # structural placeholder that always exits SUCCESS so branch
+        # protection can require it from day 1 without blocking PRs.
+        #
+        # Pre-PR pr-review-toolkit (6-agent batch) + blast-radius-review run
+        # locally on every VRT-146a PR per the spec; that is the primary
+        # review gate during the placeholder window.
+        run: |
+          echo "Codex CI review structural placeholder (VRT-146a Phase 1)."
+          echo "Full implementation ports from cchurctrip/gatekeeper-ai PR #280."
+          echo "Local pr-review-toolkit + blast-radius-review remain the primary gate."
