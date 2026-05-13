@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --env production",
     "deploy:preview": "wrangler deploy --env preview",
-    "lint": "eslint src tests --ext .ts",
+    "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
