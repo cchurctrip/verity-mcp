@@ -1,0 +1,35 @@
+name = "verity-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-09-06"
+compatibility_flags = ["nodejs_compat"]
+# account_id: set via CLOUDFLARE_ACCOUNT_ID env var (Wrangler picks it up automatically).
+# Discoverable via `wrangler whoami` once owner authenticates the local CLI.
+
+# Bundled plan: cpu_ms > 10 requires the Bundled (paid) plan. Owner-decided
+# 2026-05-13 to deploy on Bundled ($5/mo) for always-on Sentry init headroom
+# (cold-start ~30-40ms p50). Free tier's 10ms ceiling is insufficient.
+[limits]
+cpu_ms = 50
+
+# Production environment with custom domain. Routes are owner-managed:
+# the CNAME mcp.verityskills.com -> <worker>.<account>.workers.dev must be
+# added in Cloudflare DNS during Phase 4 of the rollout.
+[env.production]
+name = "verity-mcp"
+
+[[env.production.routes]]
+# Custom-domain routes pin the entire hostname to this Worker. The pattern
+# is a bare hostname per Cloudflare's docs; path wildcards are not allowed
+# when custom_domain is true (the Worker handles every path on the domain).
+pattern = "mcp.verityskills.com"
+custom_domain = true
+
+# Preview environment uses the default <worker>.<account>.workers.dev URL.
+# Used during Phase 3 for smoke-testing before DNS flip.
+[env.preview]
+name = "verity-mcp-preview"
+
+# Observability: structured logs flow to the Cloudflare tail (`wrangler tail`).
+# Sentry DSN is set as a Wrangler secret named SENTRY_DSN (not in this file).
+[observability]
+enabled = true

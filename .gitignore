@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Wrangler
+.wrangler/
+.dev.vars
+wrangler.toml.bak
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# Test coverage
+coverage/
+*.lcov
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
