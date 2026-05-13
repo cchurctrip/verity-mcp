@@ -18,7 +18,10 @@ cpu_ms = 50
 name = "verity-mcp"
 
 [[env.production.routes]]
-pattern = "mcp.verityskills.com/*"
+# Custom-domain routes pin the entire hostname to this Worker. The pattern
+# is a bare hostname per Cloudflare's docs; path wildcards are not allowed
+# when custom_domain is true (the Worker handles every path on the domain).
+pattern = "mcp.verityskills.com"
 custom_domain = true
 
 # Preview environment uses the default <worker>.<account>.workers.dev URL.
