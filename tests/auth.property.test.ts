@@ -20,7 +20,7 @@ describe('parseBearer property: only canonical inputs return non-null', () => {
     fc.assert(
       fc.property(fc.string({ minLength: 0, maxLength: 1024 }), (input) => {
         const result = parseBearer(input);
-        const canonical = /^Bearer vtk_[A-Za-z0-9]+$/.test(input);
+        const canonical = /^Bearer vtk_[A-Za-z0-9]+(?![\s\S])/.test(input);
         if (result === null) {
           return !canonical;
         }
@@ -82,7 +82,7 @@ describe('parseBearer property: DoS resistance on long inputs', () => {
   it('returns null in bounded time for very long non-matching inputs (up to 50KB)', () => {
     fc.assert(
       fc.property(fc.string({ minLength: 10_000, maxLength: 50_000 }), (input) => {
-        const canonical = /^Bearer vtk_[A-Za-z0-9]+$/.test(input);
+        const canonical = /^Bearer vtk_[A-Za-z0-9]+(?![\s\S])/.test(input);
         const result = parseBearer(input);
         return canonical ? result !== null : result === null;
       }),
