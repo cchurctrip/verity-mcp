@@ -107,7 +107,17 @@ export default {
     }
 
     if (req.method === 'GET' && url.pathname === '/') {
-      return Response.redirect('https://verityskills.com/skills', 302);
+      // Manual 302 instead of Response.redirect() so we can attach CORS
+      // headers. Response.redirect() returns a fixed response with no way
+      // to add headers; browser clients hitting cross-origin would fail the
+      // preflight before following the redirect.
+      return new Response(null, {
+        status: 302,
+        headers: {
+          ...CORS_HEADERS,
+          Location: 'https://verityskills.com/skills',
+        },
+      });
     }
 
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
