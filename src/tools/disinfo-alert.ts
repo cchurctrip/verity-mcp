@@ -1,6 +1,6 @@
 import type { Tool } from './index';
 
-export const disinfoAlert: Tool = {
+export const disinfoAlert = {
   name: 'disinfo-alert',
   description:
     'Flag potential disinformation patterns and coordinated narratives around a topic or ticker. Returns evidence patterns, source diversity, and pattern strength so a workflow can act on the verdict.',
@@ -24,4 +24,4 @@ export const disinfoAlert: Tool = {
   },
   requiresAuth: true,
   upstreamPath: '/api/skills/disinfo-alert',
-};
+} as const satisfies Tool;

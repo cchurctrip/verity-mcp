@@ -1,6 +1,6 @@
 import type { Tool } from './index';
 
-export const coordinationHeat: Tool = {
+export const coordinationHeat = {
   name: 'coordination-heat',
   description:
     'Detect coordinated activity around a topic, ticker, or narrative across public social platforms. Returns an intensity score with contributing source signals. Anonymous use permitted for public market subjects.',
@@ -25,4 +25,4 @@ export const coordinationHeat: Tool = {
   },
   requiresAuth: false,
   upstreamPath: '/api/skills/coordination-heat',
-};
+} as const satisfies Tool;

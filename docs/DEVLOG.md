@@ -109,3 +109,30 @@ readBearer from src/auth.ts (merged at d9f77d1) returns the BearerResult discrim
 **Deferred to Phase 2.4** (not in this PR): `tests/integration.test.ts` with @cloudflare/vitest-pool-workers SELF.fetch + mocked upstream covering all 6 tools across happy / 401 / 402 dual-shape / 403 / 5xx / per-tool kill switch / global kill switch / INVALID_BEARER_FORMAT. Also `@sentry/cloudflare` SDK dep landing + `SentryConfig.beforeSend` signature alignment + `LogLineFields` discriminated union refactor + `parseDisabledTools` warning log on all-malformed config.
 
 **Next step if resuming:** Start at task #1 (src/mcp.ts) on branch `feat/phase-2-mcp-tools` at `git rev-parse HEAD` (currently `6a6b322`, identical to origin/main).
+
+---
+
+## Checkpoint: 2026-05-14 (VRT-146a Phase 2.4 start)
+
+**Active task:** Phase 2.4 on branch `feat/phase-2-4-integration`. The integration-test + Sentry-init final phase of VRT-146a per the spec's deferred list.
+
+**Pre-conditions verified before first file change:**
+- PR #4 merged at `563c574` (Phase 2.3 dispatch + tool defs).
+- Main fast-forwarded; new branch `feat/phase-2-4-integration` off `origin/main`.
+- 218 tests on main; all gates green.
+
+**Plan (in dependency order):**
+1. Install `@sentry/cloudflare` as a runtime dep. Align `SentryConfig.beforeSend` signature to `(event: ErrorEvent, hint: EventHint) => ErrorEvent | null`. Update `tests/observability.test.ts` calls.
+2. Refactor `LogLineFields` to a discriminated union mirroring `ProxyOutcome.kind` so each outcome carries the right typed payload.
+3. Wire `Sentry.withSentry(buildSentryConfig(env))(handler)` in `src/index.ts`. Graceful no-op when `SENTRY_DSN` unset.
+4. `tests/integration.test.ts`: end-to-end via `@cloudflare/vitest-pool-workers` SELF.fetch + mocked upstream. All 6 tools across happy / 401 / 402 (both shapes) / 403 / 5xx / per-tool kill switch / global kill switch / INVALID_BEARER_FORMAT.
+5. Full pre-PR pipeline (6-agent + blast-radius) BEFORE opening PR #5. Apply convergent findings inline.
+6. Open PR #5; iterate to green; request merge auth.
+
+**Follow-up PR #6 (launch-readiness docs, after PR #5 merge):** README rewrite with install snippets (Claude Desktop, Cursor, direct API), DEPLOY_RUNBOOK.md, SMITHERY.md + CURSOR.md submission packages, scripts/post-deploy-smoke.sh.
+
+**Owner-blocked items surfaced at the end of this session:** Cloudflare account auth (`wrangler login`), `wrangler secret put SENTRY_DSN`, `wrangler deploy --env preview`, CNAME `mcp.verityskills.com`, Vercel env flip `MCP_HEALTH_EXPECTED=true` on main repo.
+
+**Next step if resuming:** Start at task #10 (install @sentry/cloudflare) on `feat/phase-2-4-integration` at `git rev-parse HEAD` (currently `563c574`, identical to origin/main).
+
+**Explicit defer (carried forward from Phase 2.2 plan):** the `parseDisabledTools warning log on all-malformed config` item is deferred again to VRT-146b. Rationale: the parser silently returns an empty Set when every entry trims to empty (e.g., `MCP_TOOLS_DISABLED=" , , "` from a typo'd `wrangler secret put`). The operator-UX concern is real, but a warn-log is the wrong fix without an alerting surface to read it. VRT-146b's threat model + telemetry pass is the right slot. Tracked here so the chain of custody is visible.

@@ -49,7 +49,7 @@
 // keeps the unit tests free of Response parsing boilerplate.
 
 import { readBearer } from './auth';
-import { generateRequestId } from './observability';
+import { generateRequestId, type OutcomeKind } from './observability';
 import { proxyToolCall, type ProxyEnv, type ProxyOutcome } from './upstream';
 import { TOOLS } from './tools';
 
@@ -238,6 +238,32 @@ function truncateEchoedIdent(name: string): string {
     : name;
 }
 
+// Maps a ProxyOutcome to the (upstreamStatus, errorDetail) pair the
+// entry-layer log line carries. Exhaustively switched on outcome.kind so a
+// new ProxyOutcome variant becomes a compile error here, not a runtime
+// silent-default. The same data feeds the JSON-RPC response in
+// outcomeToResponse; this helper exists separately because the response
+// shape and the log shape have different field names.
+function outcomeLogFields(outcome: ProxyOutcome): {
+  upstreamStatus: number | null;
+  errorDetail: string | null;
+} {
+  switch (outcome.kind) {
+    case 'forward':
+      return { upstreamStatus: outcome.upstreamStatus, errorDetail: null };
+    case 'upstream_5xx':
+      return { upstreamStatus: outcome.upstreamStatus, errorDetail: outcome.cause };
+    case 'upstream_network_error':
+      return { upstreamStatus: null, errorDetail: `${outcome.errorName}: ${outcome.cause}` };
+    case 'bearer_invalid':
+      return { upstreamStatus: null, errorDetail: 'INVALID_BEARER_FORMAT' };
+    case 'tool_disabled':
+      return { upstreamStatus: null, errorDetail: `TOOL_DISABLED:${truncateEchoedIdent(outcome.tool)}` };
+    case 'unknown_tool':
+      return { upstreamStatus: null, errorDetail: `unknown_tool:${truncateEchoedIdent(outcome.tool)}` };
+  }
+}
+
 // HandleMcpResult carries the response plus the observability fields the
 // entry layer needs to emit a useful structured log line: the method (or
 // tool name for tools/call), the outcome classification, and the upstream
@@ -251,10 +277,9 @@ export interface HandleMcpResult extends McpResponse {
   // never parsed or failed envelope validation.
   tool: string | null;
   // Classification of the dispatch outcome. Drives log-line filtering for
-  // on-call triage. One of the ProxyOutcome.kind values plus the framing
-  // outcomes 'parse_error' | 'invalid_envelope' | 'method_not_found' |
-  // 'initialize_ok' | 'tools_list_ok' | 'invalid_params'.
-  outcomeKind: string;
+  // on-call triage. The canonical OutcomeKind union lives in
+  // src/observability.ts and is shared with the structured log line.
+  outcomeKind: OutcomeKind;
   // Upstream HTTP status code when proxyToolCall reached the upstream and
   // got a response. Null for outcomes that never produced an upstream call
   // (initialize, tools/list, bearer_invalid, tool_disabled, unknown_tool,
@@ -411,30 +436,15 @@ export async function handleMcpRequest(
       const auth = readBearer(req);
       const outcome = await proxyToolCall(toolName, args, auth, requestId, env, fetchImpl);
       const { body: respBody, status } = outcomeToResponse(outcome, envelope.id);
+      const { upstreamStatus, errorDetail } = outcomeLogFields(outcome);
       return {
         body: respBody,
         status,
         requestId,
         tool: truncateEchoedIdent(toolName),
         outcomeKind: outcome.kind,
-        upstreamStatus:
-          outcome.kind === 'forward'
-            ? outcome.upstreamStatus
-            : outcome.kind === 'upstream_5xx'
-            ? outcome.upstreamStatus
-            : null,
-        errorDetail:
-          outcome.kind === 'upstream_5xx'
-            ? outcome.cause
-            : outcome.kind === 'upstream_network_error'
-            ? `${outcome.errorName}: ${outcome.cause}`
-            : outcome.kind === 'bearer_invalid'
-            ? 'INVALID_BEARER_FORMAT'
-            : outcome.kind === 'tool_disabled'
-            ? `TOOL_DISABLED:${truncateEchoedIdent(outcome.tool)}`
-            : outcome.kind === 'unknown_tool'
-            ? `unknown_tool:${truncateEchoedIdent(outcome.tool)}`
-            : null,
+        upstreamStatus,
+        errorDetail,
       };
     }
 

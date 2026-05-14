@@ -1,6 +1,6 @@
 import type { Tool } from './index';
 
-export const crossCheckAlert: Tool = {
+export const crossCheckAlert = {
   name: 'cross-check-alert',
   description:
     'Cross-reference a claim against authoritative sources and flag inconsistencies. Returns matched citations, source conflicts, and a confidence verdict suitable for compliance trails.',
@@ -25,4 +25,4 @@ export const crossCheckAlert: Tool = {
   },
   requiresAuth: true,
   upstreamPath: '/api/skills/cross-check-alert',
-};
+} as const satisfies Tool;

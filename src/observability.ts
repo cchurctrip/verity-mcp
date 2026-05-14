@@ -1,16 +1,19 @@
 // Structured logging + Sentry config for the verity-mcp Worker.
 //
 // The structured-log builder is wired into the /mcp dispatch path in
-// src/index.ts. Sentry wrapping via `Sentry.withSentry(buildSentryConfig(env))`
-// is deferred until the @sentry/cloudflare dependency lands; the config
-// builder is exported here so the wiring is a one-line swap when it does.
+// src/index.ts. Sentry wrapping via `Sentry.withSentry(buildSentryConfig)` is
+// wired in src/index.ts; when `SENTRY_DSN` is unset (the default pre-deploy
+// and the local-dev path), `buildSentryConfig` returns undefined and the
+// withSentry callback gracefully no-ops.
 //
-// Per VRT-146a spec hidden coupling #9: every request gets a UUIDv7 request_id
-// that propagates to upstream as x-request-id, so on-call can cross-reference
-// Worker logs to main-repo Sentry + PostHog events without time-window joins.
+// Per VRT-146a spec hidden coupling #9: every request gets a UUIDv7
+// request_id that propagates to upstream as x-request-id, so on-call can
+// cross-reference Worker logs to main-repo Sentry + PostHog events without
+// time-window joins.
 //
-// Log lines NEVER contain token values. The auth_present boolean is sufficient
-// to classify a request's auth disposition without leaking the secret.
+// Log lines NEVER contain token values. The auth_present boolean is
+// sufficient to classify a request's auth disposition without leaking the
+// secret.
 //
 // Sentry beforeSend redaction is a defense-in-depth measure. Tokens should
 // never reach Sentry events in the first place (the Worker doesn't put them
@@ -18,14 +21,52 @@
 // to Sentry.captureException(), the scrubAuthorization hook strips them
 // before the event leaves the Worker.
 
+import type { CloudflareOptions } from '@sentry/cloudflare';
+import type { ErrorEvent, EventHint } from '@sentry/core';
+
 export interface ObservabilityEnv {
   SENTRY_DSN?: string;
   COMMIT_SHA?: string;
 }
 
+// OutcomeKind is the canonical classifier for every /mcp dispatch result.
+// Each variant maps to a distinct log line + Sentry event shape. Matching the
+// ProxyOutcome.kind variants for the proxy outcomes lets the entry-layer log
+// line flow through without re-classification.
+export type OutcomeKind =
+  | 'initialize_ok'
+  | 'tools_list_ok'
+  | 'parse_error'
+  | 'invalid_envelope'
+  | 'method_not_found'
+  | 'invalid_params'
+  | 'forward'
+  | 'bearer_invalid'
+  | 'tool_disabled'
+  | 'unknown_tool'
+  | 'upstream_5xx'
+  | 'upstream_network_error';
+
+// LogLineFields is the canonical shape of every structured log line emitted
+// from src/index.ts. Keeping the OutcomeKind formal on the line (instead of
+// a free-form string) makes it greppable from on-call alerting.
+//
+// `tool` is `string | null` because not every outcome has a tool:
+// parse_error and invalid_envelope happen before method dispatch. `tools/list`
+// and `initialize` use the method name as `tool` (so log queries that filter
+// by tool surface those too). method_not_found uses the sentinel 'unknown'.
+//
+// `upstream_status` is `number | null` because only the outcomes that
+// reached the upstream and got a response back populate it (`forward`,
+// `upstream_5xx`). `upstream_network_error` and the worker-edge rejections
+// (`bearer_invalid`, `tool_disabled`, `unknown_tool`) leave it null.
+//
+// `error` is optional but carries a short, scrubbed detail string when set.
+// On-call uses this to triage; bearer values never appear here.
 export interface LogLineFields {
   request_id: string;
-  tool: string;
+  outcome_kind: OutcomeKind;
+  tool: string | null;
   upstream_status: number | null;
   latency_ms: number;
   auth_present: boolean;
@@ -92,32 +133,54 @@ export function logRequest(line: Record<string, unknown>): void {
   }
 }
 
-// scrubAuthorization is the Sentry beforeSend hook. Walks the event recursively
-// and replaces any Authorization-shaped header value with '[redacted]'. Also
-// strips x-verity-key (which would carry the raw vtk_ token if a future bug
-// ever passed upstream Headers to Sentry).
+// scrubAuthorization is the Sentry beforeSend hook. Walks the event
+// recursively and replaces any Authorization-shaped header value with
+// '[redacted]'. Also strips x-verity-key (which would carry the raw vtk_
+// token if a future bug ever passed upstream Headers to Sentry).
 //
-// Cyclic-reference safe: uses a WeakSet to track visited objects. Without this
-// guard, a Cloudflare Request-shaped payload containing a back-reference
-// (request.response.request, or operator-set context with cycles) would
-// stack-overflow inside beforeSend. Sentry's documented behavior when
-// beforeSend throws is to DROP the event, which is exactly the silent-failure
-// pattern this Worker exists to avoid.
+// Cyclic-reference safe: uses a WeakSet to track visited objects. Without
+// this guard, a Cloudflare Request-shaped payload containing a back-
+// reference (request.response.request, or operator-set context with
+// cycles) would stack-overflow inside beforeSend. Sentry's documented
+// behavior when beforeSend throws is to DROP the event, which is exactly
+// the silent-failure pattern this Worker exists to avoid.
 //
-// Returns the same event reference (mutated in place). On scrubber failure
-// (cycle limit, frozen object, prototype trap), drops the event by returning
-// null cast to T -- better to lose one Sentry event than to leak unscrubbed
-// tokens to the upstream Sentry service.
-export function scrubAuthorization<T>(event: T): T {
-  if (typeof event !== 'object' || event === null) return event;
+// Signature matches the real @sentry/core Options.beforeSend type:
+// (event: ErrorEvent, hint: EventHint) => ErrorEvent | null. The hint
+// argument is unused (the hook only inspects + mutates the event) but
+// kept in the signature so the function is assignable to the SDK's
+// expected type without a cast.
+//
+// Failure mode: on scrubber crash, we emit a structured warn-log line
+// (so on-call can see the scrubber stopped working) and return null,
+// which signals Sentry to drop the event (fail closed: lose one event
+// rather than risk leaking an unscrubbed token to the upstream Sentry
+// service).
+export function scrubAuthorization(
+  event: ErrorEvent | null,
+  _hint?: EventHint,
+): ErrorEvent | null {
+  if (event === null) return event;
   try {
-    scrubInObject(event as Record<string, unknown>, new WeakSet());
-  } catch {
-    // Scrubber crashed. Fail closed: drop the event rather than risk leaking
-    // an un-scrubbed token. Returning null is technically a type lie under
-    // the <T> generic, but Sentry's beforeSend contract permits null as the
-    // "drop this event" signal.
-    return null as unknown as T;
+    scrubInObject(event as unknown as Record<string, unknown>, new WeakSet());
+  } catch (err) {
+    // Log the scrubber crash so on-call doesn't silently lose Sentry signal.
+    // The warn line carries no event content, only the failure cause; the
+    // event itself is dropped (returning null is the Sentry contract for
+    // "drop this event").
+    try {
+      console.warn(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          kind: 'sentry_scrubber_crash',
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } catch {
+      // Even the warn-log path failed (JSON.stringify of an unstringifiable
+      // err?). Suppress: returning null below is more important than logging.
+    }
+    return null;
   }
   return event;
 }
@@ -145,25 +208,15 @@ function scrubInObject(obj: Record<string, unknown>, seen: WeakSet<object>): voi
   }
 }
 
-// Pure config builder. src/index.ts will pass this to Sentry.withSentry()
-// once @sentry/cloudflare is added as a dependency. Keeping the builder
-// pure (no init side effects) means it is testable without mocking the
-// Sentry SDK.
+// Pure config builder. src/index.ts passes this to Sentry.withSentry to wrap
+// the worker handler. Keeping the builder pure (no init side effects) means
+// it is testable without mocking the Sentry SDK.
 //
-// NOTE: the `beforeSend` signature here is generic `<T>(event: T) => T`,
-// which does not exactly match `@sentry/cloudflare`'s
-// `(event: ErrorEvent, hint: EventHint) => ErrorEvent | null`. Phase 2.3
-// will narrow the type to the real SDK shape when the dependency lands.
-// The current shape is permissive enough that tests work and the runtime
-// behavior is correct.
-export interface SentryConfig {
-  dsn: string;
-  release: string;
-  beforeSend: <T>(event: T) => T;
-}
-
-export function buildSentryConfig(env: ObservabilityEnv): SentryConfig | null {
-  if (!env.SENTRY_DSN) return null;
+// Returns `undefined` (not null) when SENTRY_DSN is unset so the value can
+// flow directly to Sentry.withSentry's optionsCallback contract (which
+// accepts `CloudflareOptions | undefined`).
+export function buildSentryConfig(env: ObservabilityEnv): CloudflareOptions | undefined {
+  if (!env.SENTRY_DSN) return undefined;
   return {
     dsn: env.SENTRY_DSN,
     release: env.COMMIT_SHA ?? 'unknown',

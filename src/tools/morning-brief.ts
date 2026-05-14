@@ -1,6 +1,6 @@
 import type { Tool } from './index';
 
-export const morningBrief: Tool = {
+export const morningBrief = {
   name: 'morning-brief',
   description:
     'Daily briefing of overnight signals across a watchlist. Aggregates coordination shifts, narrative changes, and integrity flags into one structured report ready to drop into a morning prep workflow.',
@@ -26,4 +26,4 @@ export const morningBrief: Tool = {
   },
   requiresAuth: true,
   upstreamPath: '/api/skills/morning-brief',
-};
+} as const satisfies Tool;

@@ -87,7 +87,7 @@ describe('Marketplace schema invariants (manifest <-> TOOLS parity)', () => {
   });
 
   it('manifest.tools[].requires_auth matches TOOLS[].requiresAuth', () => {
-    const codeMap = new Map(TOOLS.map((t) => [t.name, t.requiresAuth] as const));
+    const codeMap = new Map<string, boolean>(TOOLS.map((t) => [t.name, t.requiresAuth] as const));
     for (const t of manifest.tools) {
       expect(codeMap.get(t.name), `${t.name} requires_auth`).toBe(t.requires_auth);
     }
@@ -128,10 +128,10 @@ describe('Marketplace schema invariants (manifest <-> TOOLS parity)', () => {
 describe('Tool inputSchema invariants (Brand Rule #2 + marketplace contract)', () => {
   it('every inputSchema declares type=object, additionalProperties=false, and a required array', () => {
     for (const t of TOOLS) {
-      const schema = t.inputSchema as {
+      const schema = t.inputSchema as unknown as {
         type?: string;
         properties?: Record<string, unknown>;
-        required?: string[];
+        required?: readonly string[];
         additionalProperties?: boolean;
       };
       expect(schema.type, `${t.name}.inputSchema.type`).toBe('object');
