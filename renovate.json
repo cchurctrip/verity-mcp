@@ -1,0 +1,50 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    "schedule:weekly"
+  ],
+  "timezone": "America/Los_Angeles",
+  "labels": ["dependencies", "renovate"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 6,
+  "rangeStrategy": "bump",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on Monday"]
+  },
+  "packageRules": [
+    {
+      "description": "Group npm patch + minor upgrades into single weekly PR.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "npm non-major",
+      "schedule": ["before 6am on Monday"]
+    },
+    {
+      "description": "Wrangler major bumps require manual approval for ROUTINE upgrades (deploy surface, route config schema). vulnerabilityAlerts + osvVulnerabilityAlerts below override this for CVE-driven majors, which open PRs immediately regardless of this rule.",
+      "matchPackageNames": ["wrangler", "@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Sentry SDK major bumps require manual approval (public API: init, beforeSend, scope, integrations). Regex form per Renovate post-May-2024 schema: slash-delimited string inside matchPackageNames is treated as a regex.",
+      "matchPackageNames": ["/^@sentry//"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Pin GitHub Actions to digests + tagged majors.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "github-actions"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security", "dependencies"],
+    "schedule": "at any time"
+  },
+  "osvVulnerabilityAlerts": true
+}

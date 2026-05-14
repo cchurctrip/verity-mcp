@@ -1,0 +1,69 @@
+name: SAST
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+concurrency:
+  group: sast-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      # Semgrep is a HARD GATE. semgrep ci exits non-zero on ERROR or WARNING
+      # findings; that fails the workflow on purpose. No continue-on-error here.
+      # Treat findings as REAL failures per CLAUDE.md CI iterate-until-green;
+      # fix-or-justify in the PR, do not auto-pass. SARIF upload is best-effort
+      # since GHAS isn't enabled on the Pro plan — that's the only step that
+      # gets continue-on-error.
+      - name: Semgrep scan
+        run: semgrep ci --config=auto --sarif --output=semgrep.sarif --metrics=off
+      - name: Upload SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - name: Analyze
+        id: analyze
+        continue-on-error: true
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-javascript-typescript

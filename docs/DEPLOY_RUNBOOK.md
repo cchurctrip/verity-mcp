@@ -189,6 +189,22 @@ Restart Claude Desktop. Open a new conversation, ask: "Use the verity-score tool
 - **Disable a single tool:** `echo "<tool-name>" | npx wrangler secret put MCP_TOOLS_DISABLED --env production`. Effects are global immediately.
 - **Take the whole worker offline:** `echo "on" | npx wrangler secret put MCP_KILL_SWITCH --env production`. `/health` stays reachable; the smoke cron records `status=skipped`.
 
+## Dependabot secret-scope mirror (one-time, for Codex CI on bot PRs)
+
+GitHub treats Actions secrets and Dependabot secrets as separate scopes by design. Dependabot-authored PRs cannot read Actions secrets. The Codex CI workflow (`code-review.yml`) needs `OPENAI_API_KEY` available on bot PRs too, otherwise it fails with `OPENAI_API_KEY not set` while the substantive checks still pass (the same scar tissue captured in `feedback_dependabot_secret_scope_mirror.md`).
+
+One-time mirror after VRT-146b ships (and after every secret rotation that affects bot-PR-visible workflows):
+
+```bash
+# From a clone of cchurctrip/verity-mcp, with gh authenticated.
+gh secret set OPENAI_API_KEY --app dependabot --body "$OPENAI_API_KEY"
+gh secret list --app dependabot          # verify the entry exists
+```
+
+Repeat for any future secret a workflow reads on bot-authored PRs (none today beyond `OPENAI_API_KEY`).
+
+If a Dependabot PR ever shows the Codex CI check failing with a missing-secret message: re-run the mirror command above. The substantive gates (ci, sast, osv-scanner) do not depend on this and stay green either way.
+
 ## Costs
 
 - Cloudflare Workers Bundled plan: $5/mo per account.
@@ -205,6 +221,6 @@ Soup to nuts, deploying for the first time: 45-60 minutes including DNS propagat
 
 1. **`wrangler deploy` fails with "Authentication error":** re-run `wrangler login`.
 2. **`/mcp` returns 503 KILL_SWITCH_ENGAGED:** unset `MCP_KILL_SWITCH` via `wrangler secret delete MCP_KILL_SWITCH --env production`.
-3. **`/mcp` returns INVALID_BEARER_FORMAT:** the bearer regex is strict: `^Bearer vtk_[A-Za-z0-9]+$`. No whitespace, no trailing characters, no quotes. Use the raw token as issued.
+3. **`/mcp` returns INVALID_BEARER_FORMAT:** the bearer regex is strict: `/^Bearer (vtk_[A-Za-z0-9]+)(?![\s\S])/`. The trailing `(?![\s\S])` end-anchor is intentional and stricter than `$`. It rejects trailing newline / CR / LF on top of all other trailing characters (the scar tissue is `feedback_js_regex_dollar_end_anchor_newline.md` from main-repo PR #404). No whitespace, no trailing characters, no quotes. Use the raw token as issued.
 4. **DNS not resolving 10 minutes after CNAME add:** Cloudflare proxied records can take up to 24h to fully propagate in rare cases. The Worker is reachable at `<worker>.<account>.workers.dev` immediately; use that as a fallback while DNS propagates.
 5. **Bundle size error on deploy:** the worker bundle is 102 KiB gzip on the Bundled plan ceiling of 10 MiB. If you ever hit it, check `node_modules/@sentry` for accidental large transitive deps.
