@@ -76,7 +76,9 @@ describe('parseDisabledTools', () => {
     // JavaScript's String.prototype.trim() strips unicode whitespace.
     // Pin this so a future refactor that hand-rolls trimming catches the
     // regression.
-    const result = parseDisabledTools(' verity-score , disinfo-alert ');
+    const NBSP = '\u00a0';
+    const THIN = '\u2009';
+    const result = parseDisabledTools(`${NBSP}verity-score${NBSP},${THIN}disinfo-alert${THIN}`);
     expect(result.has('verity-score')).toBe(true);
     expect(result.has('disinfo-alert')).toBe(true);
   });
