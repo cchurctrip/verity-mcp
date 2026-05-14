@@ -290,6 +290,24 @@ describe('proxyToolCall', () => {
     expect(result).toEqual({ kind: 'unknown_tool', tool: 'made-up-tool' });
   });
 
+  // Gate precedence: isKnownTool runs BEFORE isToolKillSwitched (blast-
+  // radius F3). An unknown name added to MCP_TOOLS_DISABLED MUST still
+  // return unknown_tool, not tool_disabled. Otherwise an attacker probing
+  // names can distinguish "in kill switch" from "not a tool" and partially
+  // exfiltrate the kill-switch config.
+  it('unknown tool name in MCP_TOOLS_DISABLED still returns unknown_tool (precedence guard)', async () => {
+    const fetchSpy = async () => mockResponse(200, {});
+    const result = await proxyToolCall(
+      'ghost-tool',
+      {},
+      validAuth,
+      REQUEST_ID,
+      { MCP_TOOLS_DISABLED: 'ghost-tool' },
+      fetchSpy,
+    );
+    expect(result).toEqual({ kind: 'unknown_tool', tool: 'ghost-tool' });
+  });
+
   it('returns bearer_invalid when auth.kind === invalid', async () => {
     const fetchSpy = async () => mockResponse(200, {});
     const result = await proxyToolCall(

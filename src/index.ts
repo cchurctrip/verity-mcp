@@ -1,12 +1,24 @@
-// Worker entry. Phase 1 scaffold: route dispatch + /health + CORS + kill-switch.
-// Phase 2 will wire /mcp to the JSON-RPC handler in src/mcp.ts and dispatch
-// tools/call through src/upstream.ts to the parent repo's skill routes.
+// Worker entry. Routes /health, /mcp, /sse, and / and applies the global
+// kill switch + CORS to every response. The JSON-RPC dispatch logic lives in
+// src/mcp.ts; this module is the IO boundary that wraps the handler return
+// in a Response with permissive CORS headers and emits the structured log
+// line.
+//
+// Sentry initialization is deferred until the @sentry/cloudflare dependency
+// lands in a future PR. The Sentry config is still built here (pure, no side
+// effects) so the beforeSend hook is exercised by tests; once the dependency
+// is present, the module entry will be wrapped with Sentry.withSentry().
 
-export interface Env {
+import { handleMcpRequest, type McpEnv } from './mcp';
+import { buildLogLine, logRequest, type ObservabilityEnv } from './observability';
+
+// Env is the union of every binding the Worker entry needs. Extending the
+// two sub-module env shapes makes the coupling load-bearing in the type
+// system: adding a required key to McpEnv or ObservabilityEnv becomes a
+// compile error here rather than silently working until the first request
+// in production.
+export interface Env extends McpEnv, ObservabilityEnv {
   MCP_KILL_SWITCH?: string;
-  MCP_TOOLS_DISABLED?: string;
-  SENTRY_DSN?: string;
-  COMMIT_SHA?: string;
 }
 
 // Cloudflare Workers production runtime returns 0 from Date.now() at module
@@ -90,20 +102,36 @@ export default {
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
-      // Method dispatch (initialize, tools/list, tools/call) lands in the
-      // next scaffold iteration. Until then the endpoint advertises itself
-      // as not-yet-operational via the standard JSON-RPC method-not-found code.
-      return jsonResponse(
-        {
-          jsonrpc: '2.0',
-          id: null,
-          error: {
-            code: -32601,
-            message: 'Method dispatch not yet operational',
-          },
-        },
-        501,
-      );
+      // Sentry init is deferred until @sentry/cloudflare lands as a
+      // dependency. When it does, this is the line that becomes
+      // `Sentry.withSentry(buildSentryConfig(env))(handler)`. Until then
+      // no runtime Sentry call is wired; structured logs above are the
+      // observability surface.
+
+      const startedAt = Date.now();
+      const result = await handleMcpRequest(req, env);
+
+      // Structured log line. Carries the dispatched tool (or method name for
+      // initialize / tools/list), the outcome classification, and the
+      // upstream HTTP status when one was observed. On-call uses
+      // outcome_kind to distinguish upstream_5xx from upstream_network_error
+      // from bearer_invalid; tool to attribute regressions to a specific
+      // skill route; upstream_status to spot upstream-side regressions
+      // separate from Worker-side. Never logs the bearer token or request
+      // body. The bearer is captured only as the `auth_present` boolean.
+      logRequest({
+        ...buildLogLine({
+          request_id: result.requestId,
+          tool: result.tool ?? '-',
+          upstream_status: result.upstreamStatus,
+          latency_ms: Date.now() - startedAt,
+          auth_present: req.headers.get('authorization') !== null,
+          ...(result.errorDetail !== null ? { error: result.errorDetail } : {}),
+        }),
+        outcome_kind: result.outcomeKind,
+      });
+
+      return jsonResponse(result.body, result.status);
     }
 
     if (req.method === 'GET' && url.pathname === '/') {

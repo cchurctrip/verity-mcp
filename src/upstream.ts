@@ -47,7 +47,7 @@ const UPSTREAM_FETCH_TIMEOUT_MS = 30_000;
 // The six MCP tools mapped one-to-one to main-repo skill routes. Tool names
 // MUST match manifest.json.tools[].name; route paths MUST match the existing
 // app/api/skills/<name>/route.ts files. Adding a tool here is one of three
-// places to update (also manifest.json + src/tools/<name>.ts in Phase 2.3).
+// places to update (also manifest.json + src/tools/<name>.ts).
 //
 // `as const satisfies` lock-in: keeps the literal record narrow so `ToolName`
 // is the exact union of the 6 names. A new tool name added to manifest.json
@@ -135,7 +135,7 @@ export function rewriteUpgradeUrl(status: number, body: unknown): unknown {
 //                              timeout, body-already-consumed, etc.). Often
 //                              retry-safe with backoff.
 //
-// Phase 2.3 mcp.ts maps each kind to a JSON-RPC envelope:
+// src/mcp.ts outcomeToResponse maps each kind to a JSON-RPC envelope:
 //   forward                -> JSON-RPC result with the upstream body (status preserved)
 //   bearer_invalid         -> HTTP 401 with INVALID_BEARER_FORMAT body
 //   tool_disabled          -> HTTP 503 with TOOL_DISABLED body
@@ -160,15 +160,21 @@ export async function proxyToolCall(
   env: ProxyEnv,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProxyOutcome> {
-  // Per-tool kill switch first. Owner can toggle MCP_TOOLS_DISABLED at runtime
-  // via wrangler secret put without redeploying. Defense-in-depth alongside
-  // the global MCP_KILL_SWITCH check at the entry layer.
-  if (isToolKillSwitched(toolName, env)) {
-    return { kind: 'tool_disabled', tool: toolName };
-  }
-
+  // Reject unknown tools first so the kill-switch surface only reflects
+  // the 6 advertised names. Otherwise an attacker probing arbitrary names
+  // could distinguish "name in MCP_TOOLS_DISABLED" (-> 503) from "name not
+  // in TOOL_ROUTES" (-> -32602) and partially exfiltrate the operator's
+  // kill-switch config. Owner kill-switch values are still 6-name-bounded
+  // in practice; reordering hardens the contract.
   if (!isKnownTool(toolName)) {
     return { kind: 'unknown_tool', tool: toolName };
+  }
+
+  // Per-tool kill switch. Owner can toggle MCP_TOOLS_DISABLED at runtime via
+  // wrangler secret put without redeploying. Defense-in-depth alongside the
+  // global MCP_KILL_SWITCH check at the entry layer.
+  if (isToolKillSwitched(toolName, env)) {
+    return { kind: 'tool_disabled', tool: toolName };
   }
 
   // Bearer regex miss with header present -> deny at the Worker edge with the
