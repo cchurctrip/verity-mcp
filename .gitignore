@@ -31,3 +31,6 @@ coverage/
 # Logs
 *.log
 npm-debug.log*
+
+# Session-local audit artifacts from the blast-radius-review skill
+DIFFERENTIAL_REVIEW_REPORT*.md
