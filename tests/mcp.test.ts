@@ -605,7 +605,20 @@ describe('handleMcpRequest', () => {
   it('observability fields are surfaced on method_not_found', async () => {
     const r = await handleMcpRequest(jsonRequest({ jsonrpc: '2.0', id: 1, method: 'ghost', params: {} }), env);
     expect(r.outcomeKind).toBe('method_not_found');
+    expect(r.tool).toBe('unknown');
     expect(r.errorDetail).toContain('ghost');
+  });
+
+  it('method_not_found truncates long method names in both body and errorDetail', async () => {
+    const longMethod = 'm'.repeat(200);
+    const r = await handleMcpRequest(
+      jsonRequest({ jsonrpc: '2.0', id: 1, method: longMethod, params: {} }),
+      env,
+    );
+    const method = (r.body as { error: { data: { method: string } } }).error.data.method;
+    expect(method.length).toBeLessThanOrEqual(67);
+    expect(method.endsWith('...')).toBe(true);
+    expect(r.errorDetail).not.toContain(longMethod);
   });
 
   it('observability fields are surfaced on forward 200 with the upstream status', async () => {

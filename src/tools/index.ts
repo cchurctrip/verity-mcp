@@ -40,13 +40,8 @@ export const TOOLS = [
   disinfoAlert,
 ] as const satisfies readonly Tool[];
 
-// Dispatch lookup. O(1) by tool name. Returns undefined for unknown names
-// so the JSON-RPC dispatcher can decide whether to emit a -32602
-// unknown_tool envelope. Frozen so a later mutator cannot inject entries.
-const TOOL_BY_NAME: Readonly<Record<string, Tool>> = Object.freeze(
-  Object.fromEntries(TOOLS.map((t) => [t.name, t])),
-);
-
-export function getTool(name: string): Tool | undefined {
-  return TOOL_BY_NAME[name];
-}
+// No name-keyed lookup is exported here: the JSON-RPC dispatcher in
+// src/mcp.ts narrows the inbound tool name through src/upstream.ts:
+// isKnownTool + TOOL_ROUTES, which is the single source of truth for
+// dispatch. The tests/manifest.snapshot.test.ts parity check enforces
+// that TOOLS and TOOL_ROUTES carry the same six names.

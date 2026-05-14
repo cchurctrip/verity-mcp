@@ -173,7 +173,7 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
       };
     case 'tool_disabled':
       return {
-        body: { code: 'TOOL_DISABLED', tool: truncateToolName(outcome.tool) },
+        body: { code: 'TOOL_DISABLED', tool: truncateEchoedIdent(outcome.tool) },
         status: 503,
       };
     case 'unknown_tool':
@@ -184,7 +184,7 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
           error: {
             code: -32602,
             message: 'Unknown tool',
-            data: { tool: truncateToolName(outcome.tool) },
+            data: { tool: truncateEchoedIdent(outcome.tool) },
           },
         },
         status: 200,
@@ -224,17 +224,17 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
   }
 }
 
-// Maximum length of a caller-supplied tool name that gets echoed back into
-// an error response body. The bearer-auth proxy is a public surface; an
-// attacker submitting a 1 MB tool name would otherwise see it reflected
-// into the response body unbounded. The cap is well above the longest
-// real tool name (`cross-check-alert` = 17 chars) plus margin for future
-// names.
-const MAX_ECHOED_TOOL_NAME_LEN = 64;
+// Maximum length of a caller-supplied identifier (tool name, JSON-RPC
+// method name) that gets echoed back into an error response body. The
+// bearer-auth proxy is a public surface; an attacker submitting a 1 MB
+// identifier would otherwise see it reflected unbounded. The cap is well
+// above the longest real tool name (`cross-check-alert` = 17 chars) and
+// the longest expected method name (`tools/list` = 10 chars) plus margin.
+const MAX_ECHOED_IDENT_LEN = 64;
 
-function truncateToolName(name: string): string {
-  return name.length > MAX_ECHOED_TOOL_NAME_LEN
-    ? `${name.slice(0, MAX_ECHOED_TOOL_NAME_LEN)}...`
+function truncateEchoedIdent(name: string): string {
+  return name.length > MAX_ECHOED_IDENT_LEN
+    ? `${name.slice(0, MAX_ECHOED_IDENT_LEN)}...`
     : name;
 }
 
@@ -400,7 +400,7 @@ export async function handleMcpRequest(
           },
           status: 200,
           requestId,
-          tool: truncateToolName(toolName),
+          tool: truncateEchoedIdent(toolName),
           outcomeKind: 'invalid_params',
           upstreamStatus: null,
           errorDetail: 'arguments not an object',
@@ -415,7 +415,7 @@ export async function handleMcpRequest(
         body: respBody,
         status,
         requestId,
-        tool: truncateToolName(toolName),
+        tool: truncateEchoedIdent(toolName),
         outcomeKind: outcome.kind,
         upstreamStatus:
           outcome.kind === 'forward'
@@ -431,14 +431,15 @@ export async function handleMcpRequest(
             : outcome.kind === 'bearer_invalid'
             ? 'INVALID_BEARER_FORMAT'
             : outcome.kind === 'tool_disabled'
-            ? `TOOL_DISABLED:${truncateToolName(outcome.tool)}`
+            ? `TOOL_DISABLED:${truncateEchoedIdent(outcome.tool)}`
             : outcome.kind === 'unknown_tool'
-            ? `unknown_tool:${truncateToolName(outcome.tool)}`
+            ? `unknown_tool:${truncateEchoedIdent(outcome.tool)}`
             : null,
       };
     }
 
-    default:
+    default: {
+      const echoedMethod = truncateEchoedIdent(envelope.method);
       return {
         body: {
           jsonrpc: '2.0',
@@ -446,15 +447,16 @@ export async function handleMcpRequest(
           error: {
             code: -32601,
             message: 'Method not found',
-            data: { method: envelope.method },
+            data: { method: echoedMethod },
           },
         },
         status: 200,
         requestId,
-        tool: null,
+        tool: 'unknown',
         outcomeKind: 'method_not_found',
         upstreamStatus: null,
-        errorDetail: `unknown method: ${envelope.method}`,
+        errorDetail: `unknown method: ${echoedMethod}`,
       };
+    }
   }
 }
