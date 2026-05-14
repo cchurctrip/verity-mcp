@@ -1,11 +1,12 @@
 // Unit tests for src/auth.ts.
 //
-// parseBearer is tested against raw strings (including inputs that WHATWG
-// Headers would normalize away). extractBearer is tested through Request +
-// Headers (the production code path). hasAuthHeader is also Request-level.
+// parseBearer is the pure string-level function; tested against raw inputs (including
+// values that WHATWG Headers would normalize away). readBearer is the Request-level
+// tri-state classifier; tested through Request + Headers so the production code path
+// is exercised end-to-end.
 
 import { describe, expect, it } from 'vitest';
-import { extractBearer, hasAuthHeader, parseBearer } from '../src/auth';
+import { parseBearer, readBearer, type BearerResult } from '../src/auth';
 
 function reqWith(authValue: string | null): Request {
   const headers = new Headers();
@@ -84,33 +85,76 @@ describe('parseBearer rejections (raw-string inputs that bypass Headers normaliz
   });
 });
 
-describe('extractBearer (Request-level integration)', () => {
-  it('extracts canonical Bearer vtk_<token>', () => {
-    expect(extractBearer(reqWith('Bearer vtk_abc123XYZ'))).toBe('vtk_abc123XYZ');
+describe('readBearer tri-state classifier', () => {
+  it('returns { kind: "absent" } when no Authorization header', () => {
+    const result: BearerResult = readBearer(reqWith(null));
+    expect(result.kind).toBe('absent');
   });
 
-  it('returns null when no Authorization header', () => {
-    expect(extractBearer(reqWith(null))).toBeNull();
+  it('returns { kind: "valid", token } for canonical Bearer vtk_<token>', () => {
+    const result = readBearer(reqWith('Bearer vtk_abc123XYZ'));
+    expect(result.kind).toBe('valid');
+    if (result.kind === 'valid') {
+      expect(result.token).toBe('vtk_abc123XYZ');
+    }
   });
 
-  it('returns null on malformed Authorization header values that survive Headers normalization', () => {
-    expect(extractBearer(reqWith('bearer vtk_abc'))).toBeNull();
-    expect(extractBearer(reqWith('Bearer  vtk_abc'))).toBeNull();
-    expect(extractBearer(reqWith('Bearer vtk_abc+def'))).toBeNull();
-    expect(extractBearer(reqWith('garbage'))).toBeNull();
-  });
-});
-
-describe('hasAuthHeader', () => {
-  it('returns true when Authorization header is set to a canonical token', () => {
-    expect(hasAuthHeader(reqWith('Bearer vtk_abc'))).toBe(true);
+  it('returns { kind: "invalid" } on malformed Bearer (lowercase prefix)', () => {
+    expect(readBearer(reqWith('bearer vtk_abc')).kind).toBe('invalid');
   });
 
-  it('returns true when Authorization header is malformed (still present)', () => {
-    expect(hasAuthHeader(reqWith('garbage'))).toBe(true);
+  it('returns { kind: "invalid" } on malformed Bearer (double space)', () => {
+    expect(readBearer(reqWith('Bearer  vtk_abc')).kind).toBe('invalid');
   });
 
-  it('returns false when Authorization header is absent', () => {
-    expect(hasAuthHeader(reqWith(null))).toBe(false);
+  it('returns { kind: "invalid" } on malformed Bearer (non-alphanumeric chars)', () => {
+    expect(readBearer(reqWith('Bearer vtk_abc+def')).kind).toBe('invalid');
+  });
+
+  it('returns { kind: "invalid" } on non-vtk_ prefix', () => {
+    expect(readBearer(reqWith('Bearer abc123')).kind).toBe('invalid');
+  });
+
+  it('returns { kind: "invalid" } on garbage Authorization value', () => {
+    expect(readBearer(reqWith('garbage')).kind).toBe('invalid');
+  });
+
+  it('returns { kind: "invalid" } on empty-string Authorization (header present, value empty)', () => {
+    // Pins finding R5: empty string is "present but malformed" (regex miss), NOT "absent".
+    // A future runtime change that normalizes empty -> absent would silently flip this
+    // from 401 INVALID_BEARER_FORMAT to anonymous proxy; this test catches the regression.
+    expect(readBearer(reqWith('')).kind).toBe('invalid');
+  });
+
+  it('readBearer.valid token never contains the Bearer prefix (coupling #8: hash equality)', () => {
+    // Main repo lib/apiKeyAuth.ts hashApiKey() SHA-256s the raw vtk_ string. If readBearer
+    // ever returned the full match (Bearer vtk_*) instead of capture group 1 (vtk_*), the
+    // upstream x-verity-key hash compare would fail for every valid token.
+    const result = readBearer(reqWith('Bearer vtk_abc123'));
+    expect(result.kind).toBe('valid');
+    if (result.kind === 'valid') {
+      expect(result.token.startsWith('Bearer')).toBe(false);
+      expect(result.token.startsWith('vtk_')).toBe(true);
+    }
+  });
+
+  it('TypeScript exhaustiveness check: kind narrows correctly in switch', () => {
+    // Smoke check that the discriminated union narrows properly. If the type definition
+    // ever changes (e.g., adds a fourth kind), this switch becomes non-exhaustive and
+    // the compiler will flag it.
+    const result = readBearer(reqWith('Bearer vtk_abc'));
+    let label = '';
+    switch (result.kind) {
+      case 'absent':
+        label = 'absent';
+        break;
+      case 'invalid':
+        label = 'invalid';
+        break;
+      case 'valid':
+        label = result.token;
+        break;
+    }
+    expect(label).toBe('vtk_abc');
   });
 });

@@ -1,10 +1,12 @@
 // Property-based fuzz tests for src/auth.ts.
 //
-// One of the three Gate 4 (property-based test) targets from VRT-146a spec.
-// Tests parseBearer (pure function on strings) rather than extractBearer so
+// One of the three Gate 4 (property-based test) targets from VRT-146a spec
+// (mydocs/specs/2026-05-13_VRT-146a_mcp_worker.md). The spec names extractBearer
+// as the property-test target; the implementation fuzzes parseBearer instead so
 // inputs are exercised without WHATWG Headers normalization stripping
-// leading/trailing whitespace and CRLF. The Headers layer is the runtime's
-// first line of defense; parseBearer is the second.
+// leading/trailing whitespace and CRLF before the regex sees them. This is a
+// deliberate spec deviation: the Headers layer is the runtime's first line of
+// defense; parseBearer is the second and must be exercised against raw inputs.
 
 import { describe, expect, it } from 'vitest';
 import * as fc from 'fast-check';
@@ -15,12 +17,28 @@ const alphanumericChar = fc.constantFrom(...ALNUM.split(''));
 const alphanumericString = (minLength: number, maxLength: number) =>
   fc.array(alphanumericChar, { minLength, maxLength }).map((arr) => arr.join(''));
 
+// Independent oracle: hand-written predicate that mirrors the spec prose rather
+// than the production regex. If the regex in src/auth.ts is ever weakened
+// (e.g., the (?![\s\S]) end anchor is dropped or /m flag added), this oracle
+// stays correct and the property test catches the drift. Using the production
+// regex as oracle would be tautological.
+function isCanonicalBearer(input: string): boolean {
+  const PREFIX = 'Bearer vtk_';
+  if (!input.startsWith(PREFIX)) return false;
+  const tokenBody = input.slice(PREFIX.length);
+  if (tokenBody.length === 0) return false;
+  for (const ch of tokenBody) {
+    if (!/[A-Za-z0-9]/.test(ch)) return false;
+  }
+  return true;
+}
+
 describe('parseBearer property: only canonical inputs return non-null', () => {
-  it('result is non-null iff input matches the canonical bearer pattern exactly', () => {
+  it('result is non-null iff input matches the canonical bearer pattern', () => {
     fc.assert(
       fc.property(fc.string({ minLength: 0, maxLength: 1024 }), (input) => {
         const result = parseBearer(input);
-        const canonical = /^Bearer vtk_[A-Za-z0-9]+(?![\s\S])/.test(input);
+        const canonical = isCanonicalBearer(input);
         if (result === null) {
           return !canonical;
         }
@@ -34,6 +52,15 @@ describe('parseBearer property: only canonical inputs return non-null', () => {
       fc.property(alphanumericString(1, 64), (suffix) => {
         const input = `Bearer vtk_${suffix}`;
         expect(parseBearer(input)).toBe(`vtk_${suffix}`);
+      }),
+    );
+  });
+
+  it('extracted tokens never carry the Bearer prefix (coupling #8: hash equality)', () => {
+    fc.assert(
+      fc.property(alphanumericString(1, 64), (suffix) => {
+        const result = parseBearer(`Bearer vtk_${suffix}`);
+        return result !== null && !result.startsWith('Bearer') && result.startsWith('vtk_');
       }),
     );
   });
@@ -78,11 +105,11 @@ describe('parseBearer property: contaminated inputs are rejected', () => {
   });
 });
 
-describe('parseBearer property: DoS resistance on long inputs', () => {
-  it('returns null in bounded time for very long non-matching inputs (up to 50KB)', () => {
+describe('parseBearer property: long-input correctness (regex is structurally O(n))', () => {
+  it('returns null for very long non-matching inputs up to 50KB', () => {
     fc.assert(
       fc.property(fc.string({ minLength: 10_000, maxLength: 50_000 }), (input) => {
-        const canonical = /^Bearer vtk_[A-Za-z0-9]+(?![\s\S])/.test(input);
+        const canonical = isCanonicalBearer(input);
         const result = parseBearer(input);
         return canonical ? result !== null : result === null;
       }),
