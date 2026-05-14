@@ -1,0 +1,58 @@
+name: OSV-Scanner
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/osv-scanner.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+  schedule:
+    - cron: '23 5 * * 1'
+
+concurrency:
+  group: osv-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  osv-scan:
+    name: OSV scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v2.0.0
+        with:
+          scan-args: |-
+            --lockfile=package-lock.json
+            --format=sarif
+            --output=osv.sarif
+      - name: Upload SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+      - name: Fail on high or critical
+        if: always()
+        run: |
+          if [ ! -f osv.sarif ]; then
+            echo "::error::OSV-Scanner produced no SARIF output. Scanner did not run; failing closed (cannot prove no high or critical findings)."
+            exit 1
+          fi
+          blocking=$(jq '[.runs[].results[]? | select(.level=="error")] | length' osv.sarif)
+          echo "Blocking findings (SARIF level=error maps to OSV HIGH or CRITICAL): $blocking"
+          if [ "$blocking" -gt 0 ]; then
+            echo "::error::OSV-Scanner found $blocking high or critical vulnerabilities."
+            exit 1
+          fi

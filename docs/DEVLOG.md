@@ -6,6 +6,41 @@ DEVLOG at cchurctrip/verity:docs/DEVLOG.md for spec-level context.
 
 ---
 
+## Checkpoint: 2026-05-14 (VRT-146b production-readiness bootstrap start)
+
+**Active task:** wire 4 of the 8 production-readiness gates on `cchurctrip/verity-mcp`. Branch `feat/vrt-146b-prod-readiness` off main `a3c3527` (post PR #6 merge).
+
+**Approved spec sections covered (verbal approval 2026-05-14):**
+- Gate 1 SAST: Semgrep CE + GitHub CodeQL on every PR.
+- Gate 2 Deps/CVE: Renovate (general npm bumps grouped) + Dependabot (security-only) + OSV-Scanner workflow; documented secret-scope mirror for Codex CI per `feedback_dependabot_secret_scope_mirror.md`.
+- Gate 6 Perf budget: cold-start p50 less than 150ms + p99 less than 500ms documented; Lighthouse stays N/A (JSON-RPC Worker).
+- Gate 7 Threat model: STRIDE per the bearer-auth-proxy surface; `Last-reviewed: 2026-05-14` header; cross-refs scar-tissue memories.
+
+**Files to be created (zero src/** changes):**
+- `.github/workflows/sast.yml`
+- `.github/workflows/osv-scanner.yml`
+- `renovate.json`
+- `.github/dependabot.yml`
+- `docs/performance-budget.md`
+- `THREAT_MODEL.md`
+
+**Files to be modified:**
+- `docs/DEPLOY_RUNBOOK.md` (one new section documenting the Dependabot secret-scope mirror procedure)
+
+**Already done this session (cross-repo):**
+- `cchurctrip/verity-mcp`: PR #6 merged at `a3c3527` (launch-readiness docs bundle).
+- Ingestion status snapshot pulled from Vercel CLI: Reddit, News, Twitter, YouTube, Polymarket all firing on schedule, HTTP 200. Several warning-level log lines for the other agent to investigate (not in scope here).
+
+**Next step if resuming:** start at task 1 (`.github/workflows/sast.yml`) on branch `feat/vrt-146b-prod-readiness` at HEAD `a3c3527`. Then OSV-scanner, then Renovate + Dependabot, then perf budget doc, then threat model. Run 6-agent `pr-review-toolkit` batch in a single message before opening the PR. Verify zero em-dashes (`grep -cP '\x{2014}|\x{2013}|\x{2015}|\x{2212}' <file>`) on every doc with body greater than 100 words.
+
+**Context:**
+- VRT-146a code is shipped. `mcp.verityskills.com` will go live once owner runs OWNER_CHECKLIST.md Block A (Cloudflare login, Sentry project, secrets, deploy, DNS, env flip).
+- The mission for this distribution play is agent-marketing-and-discovery across ALL tiers (trial / retail / pro / fund) via MCP marketplaces, NOT just Fund-tier. The mission correction was logged this session.
+- VRT-146b hardens the surface BEFORE VRT-148 marketplace submissions. Order is deliberate: don't submit to Smithery / Cursor / Claude Desktop until SAST + deps + perf budget + threat model are in CI.
+- Pipeline workflow shift confirmed: run `pr-review-toolkit` 6-agent batch BEFORE opening the PR, apply convergent findings inline.
+
+---
+
 ## Checkpoint: 2026-05-13 (VRT-146a Phase 2.2 start)
 
 **Active task:** Implement src/observability.ts + src/upstream.ts + their tests on feat/phase-2-upstream branch. Second chunk of Phase 2 per approved spec at cchurctrip/verity:mydocs/specs/2026-05-13_VRT-146a_mcp_worker.md.
@@ -232,19 +267,3 @@ readBearer from src/auth.ts (merged at d9f77d1) returns the BearerResult discrim
 **Top priority across all projects**: ship `mcp.verityskills.com` live (Block A owner work). Verity needs to be agent-discoverable before any other distribution lever lights up.
 
 ---
-
-## ⚠️ Context Watchdog Checkpoint — 2026-05-14 10:08 (turn 5659)
-
-**Trigger:** Automatic — context window approaching limit
-**Session:** unknown
-**Working directory:** /Users/autopilotventures/workspace/verity-mcp
-
-**Status:** HARD — start new session now
-**ACTION REQUIRED:** Open a new Claude Code session. Say: "Read DEVLOG and propose plan."
-
-**To resume in a new session:**
-1. Open new Claude Code terminal in: `/Users/autopilotventures/workspace/verity-mcp`
-2. Say: "Read DEVLOG and propose plan."
-3. Claude will restate the last checkpoint and ask for confirmation
-
-**Note:** Check the most recent non-watchdog checkpoint above for the active task spec.
