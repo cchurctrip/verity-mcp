@@ -30,8 +30,8 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Sentry SDK major bumps require manual approval (public API: init, beforeSend, scope, integrations). Pattern matcher catches the whole @sentry/* namespace including future additions.",
-      "matchPackagePatterns": ["^@sentry/"],
+      "description": "Sentry SDK major bumps require manual approval (public API: init, beforeSend, scope, integrations). Regex form per Renovate post-May-2024 schema: slash-delimited string inside matchPackageNames is treated as a regex.",
+      "matchPackageNames": ["/^@sentry//"],
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
     },
