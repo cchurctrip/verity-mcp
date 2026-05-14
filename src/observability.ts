@@ -1,7 +1,9 @@
 // Structured logging + Sentry config for the verity-mcp Worker.
 //
-// Phase 2.2 ships the building blocks. Phase 2.3 wires them into the request
-// path via Sentry.withSentry() in src/index.ts.
+// The structured-log builder is wired into the /mcp dispatch path in
+// src/index.ts. Sentry wrapping via `Sentry.withSentry(buildSentryConfig(env))`
+// is deferred until the @sentry/cloudflare dependency lands; the config
+// builder is exported here so the wiring is a one-line swap when it does.
 //
 // Per VRT-146a spec hidden coupling #9: every request gets a UUIDv7 request_id
 // that propagates to upstream as x-request-id, so on-call can cross-reference
@@ -143,10 +145,10 @@ function scrubInObject(obj: Record<string, unknown>, seen: WeakSet<object>): voi
   }
 }
 
-// Pure config builder. Phase 2.3 src/index.ts will pass this to
-// Sentry.withSentry() once @sentry/cloudflare is added as a dependency.
-// Keeping the builder pure (no init side effects) means it is testable
-// without mocking the Sentry SDK.
+// Pure config builder. src/index.ts will pass this to Sentry.withSentry()
+// once @sentry/cloudflare is added as a dependency. Keeping the builder
+// pure (no init side effects) means it is testable without mocking the
+// Sentry SDK.
 //
 // NOTE: the `beforeSend` signature here is generic `<T>(event: T) => T`,
 // which does not exactly match `@sentry/cloudflare`'s
