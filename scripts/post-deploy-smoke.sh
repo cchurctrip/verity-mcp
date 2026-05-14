@@ -73,21 +73,18 @@ HEAT_ID=$(echo "$HEAT" | jq -r '.id // empty')
 [ "$HEAT_ID" = "3" ] || fail "tools/call did not echo id=3" "$HEAT"
 pass "coordination-heat dispatch returns a JSON-RPC envelope"
 
-# Check 5: Manifest schema check
-echo "Check 5: Manifest"
-MANIFEST=$(curl -sS -m 10 "$BASE_URL/manifest.json" 2>/dev/null || true)
-# The manifest is hosted at the repo level, not at the worker. Skip the
-# manifest check if the URL returns nothing usable. The repo CI gate
-# (npm run check-manifest) is the authoritative check.
+# manifest.json is hosted at the repo level (cchurctrip/verity-mcp), not by
+# the worker. The repo CI gate (`npm run check-manifest`) is the canonical
+# verification; no runtime endpoint to smoke here. Skip in this script.
 
-# Check 6: SSE stub returns 405 with JSON-RPC -32601
-echo "Check 6: GET /sse (stub)"
+# Check 5: SSE stub returns 405 with JSON-RPC -32601
+echo "Check 5: GET /sse (stub)"
 SSE_STATUS=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$BASE_URL/sse")
 [ "$SSE_STATUS" = "405" ] || fail "/sse did not return 405" "got HTTP $SSE_STATUS"
 pass "/sse stub returns 405"
 
-# Check 7: GET / redirects to verityskills.com/skills
-echo "Check 7: GET / redirect"
+# Check 6: GET / redirects to verityskills.com/skills
+echo "Check 6: GET / redirect"
 ROOT_STATUS=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$BASE_URL/")
 [ "$ROOT_STATUS" = "302" ] || fail "/ did not return 302" "got HTTP $ROOT_STATUS"
 pass "/ redirects 302"
