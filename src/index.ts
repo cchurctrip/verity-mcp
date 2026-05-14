@@ -4,13 +4,21 @@
 // in a Response with permissive CORS headers and emits the structured log
 // line.
 //
-// Sentry initialization is deferred until the @sentry/cloudflare dependency
-// lands in a future PR. The Sentry config is still built here (pure, no side
-// effects) so the beforeSend hook is exercised by tests; once the dependency
-// is present, the module entry will be wrapped with Sentry.withSentry().
+// The default export is wrapped with Sentry.withSentry so any uncaught
+// exception inside the fetch handler flows to Sentry with the
+// scrubAuthorization beforeSend hook applied. When SENTRY_DSN is unset
+// (local dev, pre-deploy), buildSentryConfig returns undefined and
+// withSentry gracefully no-ops; the handler runs unwrapped.
+
+import * as Sentry from '@sentry/cloudflare';
 
 import { handleMcpRequest, type McpEnv } from './mcp';
-import { buildLogLine, logRequest, type ObservabilityEnv } from './observability';
+import {
+  buildLogLine,
+  buildSentryConfig,
+  logRequest,
+  type ObservabilityEnv,
+} from './observability';
 
 // Env is the union of every binding the Worker entry needs. Extending the
 // two sub-module env shapes makes the coupling load-bearing in the type
@@ -35,7 +43,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 } as const;
 
-export default {
+const handler = {
   async fetch(req: Request, env: Env): Promise<Response> {
     // Lazy boot-time initialization. See comment near declaration: Date.now()
     // returns 0 at module scope in production but the real time inside a
@@ -84,7 +92,7 @@ export default {
     }
 
     if (req.method === 'GET' && url.pathname === '/sse') {
-      // SSE stub. Full SSE transport deferred to Sprint 4.
+      // SSE stub. Full SSE transport deferred to a future PR.
       // Preserves the manifest.json transport claim ('http+sse') for marketplace
       // consumers; returns a structured JSON-RPC error so probing clients see a
       // parseable response rather than a generic 404.
@@ -102,12 +110,6 @@ export default {
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
-      // Sentry init is deferred until @sentry/cloudflare lands as a
-      // dependency. When it does, this is the line that becomes
-      // `Sentry.withSentry(buildSentryConfig(env))(handler)`. Until then
-      // no runtime Sentry call is wired; structured logs above are the
-      // observability surface.
-
       const startedAt = Date.now();
       const result = await handleMcpRequest(req, env);
 
@@ -119,17 +121,17 @@ export default {
       // skill route; upstream_status to spot upstream-side regressions
       // separate from Worker-side. Never logs the bearer token or request
       // body. The bearer is captured only as the `auth_present` boolean.
-      logRequest({
-        ...buildLogLine({
+      logRequest(
+        buildLogLine({
           request_id: result.requestId,
-          tool: result.tool ?? '-',
+          outcome_kind: result.outcomeKind,
+          tool: result.tool,
           upstream_status: result.upstreamStatus,
           latency_ms: Date.now() - startedAt,
           auth_present: req.headers.get('authorization') !== null,
           ...(result.errorDetail !== null ? { error: result.errorDetail } : {}),
         }),
-        outcome_kind: result.outcomeKind,
-      });
+      );
 
       return jsonResponse(result.body, result.status);
     }
@@ -150,7 +152,22 @@ export default {
 
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
   },
-};
+} satisfies ExportedHandler<Env>;
+
+// Sentry.withSentry wraps the handler. The wrap is unconditional: the SDK
+// always installs the fetch proxy and initializes the client. When
+// SENTRY_DSN is unset (local dev, pre-deploy), buildSentryConfig returns
+// undefined and the SDK initializes with no DSN; captured events fail to
+// transmit at the transport layer. When SENTRY_DSN is set (production),
+// uncaught exceptions inside the fetch handler flow to Sentry with the
+// scrubAuthorization beforeSend hook applied.
+//
+// The <Env> generic propagates our repo-local interface (extending
+// McpEnv + ObservabilityEnv) through to the optionsCallback. Eta-reduced
+// from `(env) => buildSentryConfig(env)` because the function reference
+// is structurally compatible with the SDK's `(env: Env) =>
+// CloudflareOptions | undefined` shape (Env extends ObservabilityEnv).
+export default Sentry.withSentry<Env>(buildSentryConfig, handler);
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {

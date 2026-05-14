@@ -1,6 +1,6 @@
 import type { Tool } from './index';
 
-export const verityScore: Tool = {
+export const verityScore = {
   name: 'verity-score',
   description:
     'Composite integrity score for a market subject. Returns a 0 to 100 score with contributing factor weights so an analyst can decide whether a thesis is grounded before committing capital.',
@@ -18,4 +18,4 @@ export const verityScore: Tool = {
   },
   requiresAuth: true,
   upstreamPath: '/api/skills/verity-score',
-};
+} as const satisfies Tool;

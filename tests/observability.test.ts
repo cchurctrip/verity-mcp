@@ -9,6 +9,7 @@ import {
   generateRequestId,
   scrubAuthorization,
 } from '../src/observability';
+import type { ErrorEvent } from '@sentry/core';
 
 const UUIDV7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -76,12 +77,14 @@ describe('buildLogLine', () => {
   it('produces a structured object with ts + provided fields', () => {
     const line = buildLogLine({
       request_id: 'abc',
+      outcome_kind: 'forward',
       tool: 'verity-score',
       upstream_status: 200,
       latency_ms: 42,
       auth_present: true,
     });
     expect(line['request_id']).toBe('abc');
+    expect(line['outcome_kind']).toBe('forward');
     expect(line['tool']).toBe('verity-score');
     expect(line['upstream_status']).toBe(200);
     expect(line['latency_ms']).toBe(42);
@@ -94,6 +97,7 @@ describe('buildLogLine', () => {
   it('NEVER includes a token value (auth_present is boolean only)', () => {
     const line = buildLogLine({
       request_id: 'abc',
+      outcome_kind: 'forward',
       tool: 'verity-score',
       upstream_status: 200,
       latency_ms: 42,
@@ -108,6 +112,7 @@ describe('buildLogLine', () => {
   it('preserves optional error field when provided', () => {
     const line = buildLogLine({
       request_id: 'abc',
+      outcome_kind: 'upstream_5xx',
       tool: 'verity-score',
       upstream_status: 502,
       latency_ms: 30100,
@@ -116,24 +121,38 @@ describe('buildLogLine', () => {
     });
     expect(line['error']).toBe('upstream timeout');
   });
+
+  it('accepts tool: null for outcomes that have no associated tool', () => {
+    const line = buildLogLine({
+      request_id: 'abc',
+      outcome_kind: 'parse_error',
+      tool: null,
+      upstream_status: null,
+      latency_ms: 1,
+      auth_present: false,
+      error: 'unparseable body',
+    });
+    expect(line['tool']).toBeNull();
+    expect(line['outcome_kind']).toBe('parse_error');
+  });
 });
 
 describe('scrubAuthorization', () => {
   it('redacts top-level Authorization header (case-insensitive)', () => {
     const event = { request: { headers: { Authorization: 'Bearer vtk_secret' } } };
-    scrubAuthorization(event);
+    scrubAuthorization(event as unknown as ErrorEvent);
     expect(event.request.headers.Authorization).toBe('[redacted]');
   });
 
   it('redacts top-level authorization (lowercase)', () => {
     const event = { request: { headers: { authorization: 'Bearer vtk_secret' } } };
-    scrubAuthorization(event);
+    scrubAuthorization(event as unknown as ErrorEvent);
     expect(event.request.headers.authorization).toBe('[redacted]');
   });
 
   it('redacts X-Verity-Key (variant casing)', () => {
     const event = { request: { headers: { 'x-verity-key': 'vtk_abc' } } };
-    scrubAuthorization(event);
+    scrubAuthorization(event as unknown as ErrorEvent);
     expect(event.request.headers['x-verity-key']).toBe('[redacted]');
   });
 
@@ -144,7 +163,7 @@ describe('scrubAuthorization', () => {
         { data: { headers: { 'content-type': 'application/json' } } },
       ],
     };
-    scrubAuthorization(event);
+    scrubAuthorization(event as unknown as ErrorEvent);
     expect(event.breadcrumbs[0]?.data.headers.Authorization).toBe('[redacted]');
     // Non-auth header is preserved
     expect(event.breadcrumbs[1]?.data.headers['content-type']).toBe('application/json');
@@ -155,7 +174,7 @@ describe('scrubAuthorization', () => {
       request: { headers: { 'content-type': 'application/json', accept: '*/*' } },
       level: 'error',
     };
-    scrubAuthorization(event);
+    scrubAuthorization(event as unknown as ErrorEvent);
     expect(event.request.headers['content-type']).toBe('application/json');
     expect(event.request.headers.accept).toBe('*/*');
     expect(event.level).toBe('error');
@@ -163,15 +182,12 @@ describe('scrubAuthorization', () => {
 
   it('returns the input event reference (Sentry beforeSend contract)', () => {
     const event = { request: { headers: {} } };
-    const result = scrubAuthorization(event);
+    const result = scrubAuthorization(event as unknown as ErrorEvent);
     expect(result).toBe(event);
   });
 
-  it('handles non-object input safely', () => {
+  it('handles null event safely (Sentry passes null when beforeSend is invoked with no event)', () => {
     expect(scrubAuthorization(null)).toBe(null);
-    expect(scrubAuthorization(undefined)).toBe(undefined);
-    expect(scrubAuthorization('string')).toBe('string');
-    expect(scrubAuthorization(42)).toBe(42);
   });
 
   it('handles circular references without stack overflow (WeakSet visited-tracking)', () => {
@@ -182,7 +198,7 @@ describe('scrubAuthorization', () => {
       request: { headers: { Authorization: 'Bearer vtk_secret' } },
     };
     event['self'] = event;
-    expect(() => scrubAuthorization(event)).not.toThrow();
+    expect(() => scrubAuthorization(event as unknown as ErrorEvent)).not.toThrow();
     const headers = (event['request'] as Record<string, unknown>)['headers'] as Record<string, unknown>;
     expect(headers['Authorization']).toBe('[redacted]');
   });
@@ -194,21 +210,21 @@ describe('scrubAuthorization', () => {
         { headers: { Authorization: 'Bearer vtk_b' } },
       ],
     };
-    scrubAuthorization(event);
+    scrubAuthorization(event as unknown as ErrorEvent);
     expect(event.records[0]?.headers.Authorization).toBe('[redacted]');
     expect(event.records[1]?.headers.Authorization).toBe('[redacted]');
   });
 });
 
 describe('buildSentryConfig', () => {
-  it('returns null when SENTRY_DSN is unset', () => {
-    expect(buildSentryConfig({})).toBeNull();
-    expect(buildSentryConfig({ COMMIT_SHA: 'abc' })).toBeNull();
+  it('returns undefined when SENTRY_DSN is unset', () => {
+    expect(buildSentryConfig({})).toBeUndefined();
+    expect(buildSentryConfig({ COMMIT_SHA: 'abc' })).toBeUndefined();
   });
 
   it('returns config when SENTRY_DSN is set', () => {
     const cfg = buildSentryConfig({ SENTRY_DSN: 'https://test@sentry.io/1', COMMIT_SHA: 'abc' });
-    expect(cfg).not.toBeNull();
+    expect(cfg).toBeDefined();
     expect(cfg!.dsn).toBe('https://test@sentry.io/1');
     expect(cfg!.release).toBe('abc');
     expect(typeof cfg!.beforeSend).toBe('function');
@@ -219,10 +235,13 @@ describe('buildSentryConfig', () => {
     expect(cfg!.release).toBe('unknown');
   });
 
-  it('beforeSend hook scrubs Authorization headers', () => {
+  it('beforeSend hook scrubs Authorization headers (called with event + hint per real SDK contract)', () => {
     const cfg = buildSentryConfig({ SENTRY_DSN: 'https://test@sentry.io/1' });
     const event = { request: { headers: { Authorization: 'Bearer vtk_secret' } } };
-    cfg!.beforeSend(event);
+    // The real Sentry SDK invokes beforeSend with (event, hint). Confirm
+    // the assignable shape: a no-arg call would compile-fail, a 2-arg call
+    // works.
+    cfg!.beforeSend!(event as never, {} as never);
     expect(event.request.headers.Authorization).toBe('[redacted]');
   });
 });
