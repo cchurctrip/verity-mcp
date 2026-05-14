@@ -136,3 +136,115 @@ readBearer from src/auth.ts (merged at d9f77d1) returns the BearerResult discrim
 **Next step if resuming:** Start at task #10 (install @sentry/cloudflare) on `feat/phase-2-4-integration` at `git rev-parse HEAD` (currently `563c574`, identical to origin/main).
 
 **Explicit defer (carried forward from Phase 2.2 plan):** the `parseDisabledTools warning log on all-malformed config` item is deferred again to VRT-146b. Rationale: the parser silently returns an empty Set when every entry trims to empty (e.g., `MCP_TOOLS_DISABLED=" , , "` from a typo'd `wrangler secret put`). The operator-UX concern is real, but a warn-log is the wrong fix without an alerting surface to read it. VRT-146b's threat model + telemetry pass is the right slot. Tracked here so the chain of custody is visible.
+
+---
+
+## Checkpoint: 2026-05-14 (Launch-readiness docs)
+
+**Active task:** PR #6 on branch `feat/phase-2-4-docs`. Docs-only bundle landing after PR #5 merged.
+
+**Pre-conditions verified:**
+- PR #5 merged at `242158a`. VRT-146a code complete on main (Phases 1, 2.1, 2.2, 2.3, 2.4 all shipped).
+- 237 tests on main; all gates green.
+
+**Scope:**
+- `README.md` rewrite with concrete install snippets (Claude Desktop, Cursor, direct curl).
+- `docs/DEPLOY_RUNBOOK.md`: owner-executable deploy steps (8 numbered steps, ~45 min owner time).
+- `docs/SMITHERY.md`: Smithery.ai marketplace submission package (YAML manifest + screenshot guidance).
+- `docs/CURSOR.md`: Cursor Directory submission + Cursor Desktop config.
+- `docs/CLAUDE_DESKTOP.md`: Claude Desktop install snippet + troubleshooting.
+- `docs/OWNER_CHECKLIST.md`: sequenced action list (Block A deploy, Block B discovery, Block C launch, Block D monitoring).
+- `docs/launch-drafts/hn-show-post.md`: Show HN draft + posting plan.
+- `docs/launch-drafts/linkedin-essay.md`: Angle 9 essay (600 words).
+- `docs/launch-drafts/twitter-thread.md`: 8-tweet thread.
+- `docs/launch-drafts/skills-page-rewrite.md`: /skills page Angle 9 rewrite (owner-approval required; do not modify the main verity repo directly per Brand Rule).
+- `scripts/post-deploy-smoke.sh`: 7-check post-deploy smoke (run after `wrangler deploy`).
+
+**Pipeline note:** docs-only PR. Skip the 6-agent + blast-radius batch (per code-review plugin rule "official /code-review plugin skips drafts" and the canonical workflow which reserves the full batch for code changes). Em-dash audit + brand-rule check applied locally before commit.
+
+**Next step if resuming:** Commit, push, open PR #6, iterate to green.
+
+---
+
+### Session #17, 2026-05-14
+**Status**: VRT-146a code complete on main; PR #6 (launch-readiness docs) open at iter-2 awaiting CI poll + merge auth.
+**Files changed**: 22 across 4 PRs in this session.
+
+**Accomplished**:
+- **PR #3 (Phase 2.2 observability + upstream)** merged at `6a6b322`. Admin-squash on owner go-ahead. Bugbot SUCCESS verified per-SHA on 213968c.
+- **PR #4 (Phase 2.3 JSON-RPC framing + 6 tool defs + Gate 4 target 3 of 3)** merged at `563c574` after iter-2. 7-agent pre-PR pipeline ran in parallel. Iter-1 Bugbot found 3 findings (medium method-name amplification, low method_not_found tool=null contradiction, low dead-code getTool); all addressed in iter-2.
+- **PR #5 (Phase 2.4 Sentry SDK + integration tests + log refactor)** merged at `242158a`. Adds `@sentry/cloudflare@10.53.1` runtime dep; wraps worker entry with `Sentry.withSentry`; aligns `scrubAuthorization` signature to real SDK; adds 18-test integration suite via SELF.fetch + fetchMock; refactors `LogLineFields` with `OutcomeKind` union; per-tool `as const satisfies Tool` for compile-time TOOLS/TOOL_ROUTES parity. 7-agent pre-PR pipeline + blast-radius SHIP verdict.
+- **PR #6 (launch-readiness docs)** open at `292f654` after iter-2. 1163 LOC of docs + scripts: DEPLOY_RUNBOOK, SMITHERY, CURSOR, CLAUDE_DESKTOP, OWNER_CHECKLIST, 4 launch-post drafts, README rewrite, post-deploy-smoke.sh. Iter-1 Bugbot found 1 low-severity finding (no-op Check 5 in smoke script); fixed in iter-2 by removing Check 5 and renumbering.
+- **VRT-146a is code-complete.** Phases 1, 2.1, 2.2, 2.3, 2.4 all on main. 237 tests passing.
+
+**Key changes**:
+- `src/observability.ts`: aligned `beforeSend` to `(event: ErrorEvent | null, hint?: EventHint) => ErrorEvent | null`; warn-log on scrubber crash; new OutcomeKind union (12 variants); LogLineFields extended.
+- `src/index.ts`: wrapped default export with `Sentry.withSentry<Env>(buildSentryConfig, handler)`; structured log emits `outcome_kind`, `tool`, `upstream_status`, `error` per request.
+- `src/mcp.ts`: new `outcomeLogFields` exhaustive switch replaces 16-line nested ternary; `HandleMcpResult.outcomeKind: OutcomeKind`.
+- `src/tools/*.ts` (6 files): `as const satisfies Tool` pattern; literal-narrowing on name; TOOLS/TOOL_ROUTES drift now a compile error.
+- `tests/integration.test.ts` (NEW, 309 LOC): SELF.fetch + fetchMock; all 6 tools happy + 401 + 402 dual + 403 + 5xx + INVALID_BEARER + arguments validation + x-verity-key auth contract + Sentry wrap smoke.
+- `docs/DEPLOY_RUNBOOK.md` (NEW): 8 numbered owner-executable steps from `wrangler login` through synthetic-smoke flip.
+- `docs/OWNER_CHECKLIST.md` (NEW): Block A deploy 45 min, Block B discovery 90 min parallel, Block C launch 60 min parallel, Block D monitoring ongoing.
+- `scripts/post-deploy-smoke.sh` (NEW): 6-check post-deploy smoke (was 7-check with one no-op; iter-2 fix).
+
+**Decisions**:
+- Bundle size 40 KiB to 102 KiB gzip after @sentry/cloudflare landed. Acceptable on Bundled plan ($5/mo) ceiling of 10 MiB.
+- Integration-layer kill-switch tests deferred: cloudflare:test `env` mutation does not propagate to the worker isolate. Kill switches are exhaustively covered at the unit layer (parser + dispatch + handler). Adding a `wrangler.toml [env.test].vars` setup is the future fix.
+- `parseDisabledTools` warning log on all-malformed config deferred to VRT-146b alongside the threat model + telemetry pass. Tracked in DEVLOG so the chain of custody is visible.
+- `LogLineFields` discriminated union refactor: kept as a flat shape with `OutcomeKind`. Full discriminated-union would require per-outcome typed `tool` + `upstream_status` + `error` fields; type-design polish, not a coverage gap.
+- `/skills` page rewrite in main verity repo NOT pushed directly. Brand Rule prohibits modifying `/`, `/funds`, `/skills`, `/upgrade` without explicit go-ahead. Draft lives in `docs/launch-drafts/skills-page-rewrite.md` for owner review.
+
+**Remaining todos (next session priority)**:
+1. [ ] 🚨 Owner: merge PR #6 (request via plain-text "merge 6" when ready).
+2. [ ] 🚨 Owner: Block A in `docs/OWNER_CHECKLIST.md`. 45 minutes. `wrangler login` -> Sentry project -> secrets -> preview deploy -> DNS CNAME -> production deploy -> Vercel env flip. Outcome: `mcp.verityskills.com` live.
+3. [ ] 🔍 Owner: Block B (Smithery + Cursor Directory + MCP registry submissions; review skills-page-rewrite draft).
+4. [ ] ✨ Owner: Block C (approve launch drafts, schedule HN + LinkedIn + X).
+5. [ ] VRT-146b: 8-gate prod-readiness bootstrap on sibling repo (deferred per spec until 146a deploys).
+6. [ ] VRT-148: marketplace submission package activation once owner submits via paths in `docs/SMITHERY.md` and `docs/CURSOR.md`.
+
+### Handoff for next session
+**Current state**: VRT-146a code complete on main at `242158a`. PR #6 open at `292f654` (iter-2; needs CI poll + Bugbot re-verification + plain-text merge auth). Local branch `feat/phase-2-4-docs`. Untracked stash `stash@{0}: watchdog devlog additions` survives on the worktree (safe to drop manually).
+
+**Context files**:
+1. `docs/DEVLOG.md` (this file)
+2. `docs/OWNER_CHECKLIST.md` (the next 4 hours of owner work)
+3. `docs/DEPLOY_RUNBOOK.md` (Block A step-by-step)
+
+**Next 3 steps on resume**:
+1. `gh pr checks 6 --json name,state,bucket` and verify Bugbot SUCCESS per-SHA on `292f654` (not stale).
+2. If green, request plain-text "merge 6" authorization and admin-squash-merge.
+3. After PR #6 merges, the agent's work is done. Owner picks up at `docs/OWNER_CHECKLIST.md` Block A.
+
+**Ask on resume**: PR #6 iter-2 CI state? If green, "merge 6"?
+
+---
+
+## Multi-project status (snapshot 2026-05-14)
+
+| Repo | Last session | Status |
+|---|---|---|
+| `verity-mcp` (this) | 2026-05-14 Session #17 | VRT-146a code complete; PR #6 docs at iter-2 |
+| `gatekeeper-ai` | 2026-05-09 | Play Store screenshots captured + validated |
+| `workspace-verity` | 2026-05-05 Session #11 | VRT-109 wave-1 PR-A shipped + cron incident resolved |
+| `mission-control` | 2026-03-13 Session #2 | Stale; needs review |
+| `gatekeeper-app-testing` | 2026-04-07 | Stale |
+
+**Top priority across all projects**: ship `mcp.verityskills.com` live (Block A owner work). Verity needs to be agent-discoverable before any other distribution lever lights up.
+
+---
+
+## ⚠️ Context Watchdog Checkpoint — 2026-05-14 10:08 (turn 5659)
+
+**Trigger:** Automatic — context window approaching limit
+**Session:** unknown
+**Working directory:** /Users/autopilotventures/workspace/verity-mcp
+
+**Status:** HARD — start new session now
+**ACTION REQUIRED:** Open a new Claude Code session. Say: "Read DEVLOG and propose plan."
+
+**To resume in a new session:**
+1. Open new Claude Code terminal in: `/Users/autopilotventures/workspace/verity-mcp`
+2. Say: "Read DEVLOG and propose plan."
+3. Claude will restate the last checkpoint and ask for confirmation
+
+**Note:** Check the most recent non-watchdog checkpoint above for the active task spec.
