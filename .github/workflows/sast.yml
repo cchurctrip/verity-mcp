@@ -30,6 +30,12 @@ jobs:
       image: returntocorp/semgrep
     steps:
       - uses: actions/checkout@v4
+      # Semgrep is a HARD GATE. semgrep ci exits non-zero on ERROR or WARNING
+      # findings; that fails the workflow on purpose. No continue-on-error here.
+      # Treat findings as REAL failures per CLAUDE.md CI iterate-until-green;
+      # fix-or-justify in the PR, do not auto-pass. SARIF upload is best-effort
+      # since GHAS isn't enabled on the Pro plan — that's the only step that
+      # gets continue-on-error.
       - name: Semgrep scan
         run: semgrep ci --config=auto --sarif --output=semgrep.sarif --metrics=off
       - name: Upload SARIF
