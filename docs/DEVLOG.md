@@ -136,3 +136,30 @@ readBearer from src/auth.ts (merged at d9f77d1) returns the BearerResult discrim
 **Next step if resuming:** Start at task #10 (install @sentry/cloudflare) on `feat/phase-2-4-integration` at `git rev-parse HEAD` (currently `563c574`, identical to origin/main).
 
 **Explicit defer (carried forward from Phase 2.2 plan):** the `parseDisabledTools warning log on all-malformed config` item is deferred again to VRT-146b. Rationale: the parser silently returns an empty Set when every entry trims to empty (e.g., `MCP_TOOLS_DISABLED=" , , "` from a typo'd `wrangler secret put`). The operator-UX concern is real, but a warn-log is the wrong fix without an alerting surface to read it. VRT-146b's threat model + telemetry pass is the right slot. Tracked here so the chain of custody is visible.
+
+---
+
+## Checkpoint: 2026-05-14 (Launch-readiness docs)
+
+**Active task:** PR #6 on branch `feat/phase-2-4-docs`. Docs-only bundle landing after PR #5 merged.
+
+**Pre-conditions verified:**
+- PR #5 merged at `242158a`. VRT-146a code complete on main (Phases 1, 2.1, 2.2, 2.3, 2.4 all shipped).
+- 237 tests on main; all gates green.
+
+**Scope:**
+- `README.md` rewrite with concrete install snippets (Claude Desktop, Cursor, direct curl).
+- `docs/DEPLOY_RUNBOOK.md`: owner-executable deploy steps (8 numbered steps, ~45 min owner time).
+- `docs/SMITHERY.md`: Smithery.ai marketplace submission package (YAML manifest + screenshot guidance).
+- `docs/CURSOR.md`: Cursor Directory submission + Cursor Desktop config.
+- `docs/CLAUDE_DESKTOP.md`: Claude Desktop install snippet + troubleshooting.
+- `docs/OWNER_CHECKLIST.md`: sequenced action list (Block A deploy, Block B discovery, Block C launch, Block D monitoring).
+- `docs/launch-drafts/hn-show-post.md`: Show HN draft + posting plan.
+- `docs/launch-drafts/linkedin-essay.md`: Angle 9 essay (600 words).
+- `docs/launch-drafts/twitter-thread.md`: 8-tweet thread.
+- `docs/launch-drafts/skills-page-rewrite.md`: /skills page Angle 9 rewrite (owner-approval required; do not modify the main verity repo directly per Brand Rule).
+- `scripts/post-deploy-smoke.sh`: 7-check post-deploy smoke (run after `wrangler deploy`).
+
+**Pipeline note:** docs-only PR. Skip the 6-agent + blast-radius batch (per code-review plugin rule "official /code-review plugin skips drafts" and the canonical workflow which reserves the full batch for code changes). Em-dash audit + brand-rule check applied locally before commit.
+
+**Next step if resuming:** Commit, push, open PR #6, iterate to green.
