@@ -6,6 +6,32 @@ DEVLOG at cchurctrip/verity:docs/DEVLOG.md for spec-level context.
 
 ---
 
+## Checkpoint: 2026-05-15 (VRT-146d Sentry environment tag follow-up)
+
+**Active task:** add `environment` tag to Worker's Sentry init so events filter cleanly when the same `SENTRY_DSN` is shared with the main verityskills.com Next.js app. Branch `feat/vrt-146d-sentry-environment-tag` off main `a049f36` (post VRT-146b merge).
+
+**Why this is necessary:** Block A reused the existing main-repo `SENTRY_DSN` to keep deploy fast. Without an `environment` tag on Worker events, Worker errors mix visually with Next.js errors in the same Sentry project view. The release-tag filter (commit SHA) partially separates them but is awkward for on-call. Setting `environment: 'verity-mcp-production'` / `'verity-mcp-preview'` is the canonical Sentry separation pattern.
+
+**Worker secret already deployed during Block A.** Both preview and production Workers already have `SENTRY_ENVIRONMENT` set via `wrangler secret put`. The current main code does NOT read it, so the secret is dormant. This PR adds the code that reads it; post-merge redeploy activates the tag.
+
+**Approved scope (verbal approval 2026-05-15):**
+- `src/observability.ts`: add `SENTRY_ENVIRONMENT?: string` to `ObservabilityEnv` interface; add `environment: env.SENTRY_ENVIRONMENT ?? 'verity-mcp-unknown'` to `buildSentryConfig` return.
+- `tests/observability.test.ts`: 4 new test cases covering happy-path production tag, preview tag, unset fallback, empty-string fallback.
+
+**Files modified:**
+- `src/observability.ts` (8 lines added)
+- `tests/observability.test.ts` (35 lines added)
+- `docs/DEVLOG.md` (this entry)
+
+**Next step if resuming:** run pre-PR 6-agent batch on the diff, push branch, open PR, iterate-until-green, request "merge 9" plain-text auth, redeploy Worker production to activate the tag.
+
+**Context (post Block A):**
+- `mcp.verityskills.com` went live during Block A on 2026-05-14T20:50Z. Synthetic-smoke cron verified healthy.
+- VRT-146a / VRT-146b / VRT-146c all shipped. VRT-148 marketplace submissions held until manual real-world testing.
+- User-side follow-ups outstanding: Claude Desktop config test (5 min), Cloudflare API token rotation after this PR's redeploy.
+
+---
+
 ## Checkpoint: 2026-05-14 (VRT-146b production-readiness bootstrap start)
 
 **Active task:** wire 4 of the 8 production-readiness gates on `cchurctrip/verity-mcp`. Branch `feat/vrt-146b-prod-readiness` off main `a3c3527` (post PR #6 merge).

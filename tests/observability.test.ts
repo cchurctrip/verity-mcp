@@ -235,6 +235,35 @@ describe('buildSentryConfig', () => {
     expect(cfg!.release).toBe('unknown');
   });
 
+  it('sets environment from SENTRY_ENVIRONMENT for Sentry-side filtering', () => {
+    const cfg = buildSentryConfig({
+      SENTRY_DSN: 'https://test@sentry.io/1',
+      SENTRY_ENVIRONMENT: 'verity-mcp-production',
+    });
+    expect(cfg!.environment).toBe('verity-mcp-production');
+  });
+
+  it('preview environment tag flows through unchanged', () => {
+    const cfg = buildSentryConfig({
+      SENTRY_DSN: 'https://test@sentry.io/1',
+      SENTRY_ENVIRONMENT: 'verity-mcp-preview',
+    });
+    expect(cfg!.environment).toBe('verity-mcp-preview');
+  });
+
+  it('defaults environment to "verity-mcp-unknown" when SENTRY_ENVIRONMENT is unset', () => {
+    const cfg = buildSentryConfig({ SENTRY_DSN: 'https://test@sentry.io/1' });
+    expect(cfg!.environment).toBe('verity-mcp-unknown');
+  });
+
+  it('defaults environment when SENTRY_ENVIRONMENT is empty string (falsy)', () => {
+    const cfg = buildSentryConfig({
+      SENTRY_DSN: 'https://test@sentry.io/1',
+      SENTRY_ENVIRONMENT: '',
+    });
+    expect(cfg!.environment).toBe('verity-mcp-unknown');
+  });
+
   it('beforeSend hook scrubs Authorization headers (called with event + hint per real SDK contract)', () => {
     const cfg = buildSentryConfig({ SENTRY_DSN: 'https://test@sentry.io/1' });
     const event = { request: { headers: { Authorization: 'Bearer vtk_secret' } } };

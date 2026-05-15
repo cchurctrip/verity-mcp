@@ -27,6 +27,14 @@ import type { ErrorEvent, EventHint } from '@sentry/core';
 export interface ObservabilityEnv {
   SENTRY_DSN?: string;
   COMMIT_SHA?: string;
+  // Tagged on every Sentry event so events from this Worker can be filtered
+  // separately from events posted by the main verityskills.com Next.js app
+  // when the same SENTRY_DSN is shared between the two surfaces. Set via
+  // wrangler secret per environment ('verity-mcp-production' /
+  // 'verity-mcp-preview'). Falls back to 'verity-mcp-unknown' when unset OR
+  // when set to an empty string (operator misconfiguration); either is an
+  // actionable signal in the Sentry UI.
+  SENTRY_ENVIRONMENT?: string;
 }
 
 // OutcomeKind is the canonical classifier for every /mcp dispatch result.
@@ -220,6 +228,7 @@ export function buildSentryConfig(env: ObservabilityEnv): CloudflareOptions | un
   return {
     dsn: env.SENTRY_DSN,
     release: env.COMMIT_SHA ?? 'unknown',
+    environment: env.SENTRY_ENVIRONMENT || 'verity-mcp-unknown',
     beforeSend: scrubAuthorization,
   };
 }
