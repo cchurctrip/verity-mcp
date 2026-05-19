@@ -192,7 +192,13 @@ liveDescribe('live contract: 6 tools vs mcp.verityskills.com', () => {
 // rely on it and so a future "consistency cleanup" is a deliberate,
 // test-breaking decision rather than an accident. Do NOT "fix" this.
 liveDescribe('live contract C3: per-tool auth status codes (documented inconsistency)', () => {
-  const BOGUS_KEY = 'vtk_definitely_not_a_real_key_000000';
+  // Must be a WELL-FORMED bearer (matches the Worker bearer regex
+  // vtk_[A-Za-z0-9]+, no underscores after vtk_) but not a real or
+  // entitled key. A malformed key would be rejected by the Worker with an
+  // edge 401 INVALID_BEARER_FORMAT before it ever reaches upstream, so the
+  // per-tool upstream auth statuses below (the actual C3 contract) would
+  // never be exercised. Keep this alphanumeric.
+  const BOGUS_KEY = 'vtk_definitelynotarealkey0000000000';
 
   it('verity-score answers an invalid key with 401', async () => {
     const { status } = await callTool('verity-score', { subject: 'NVDA' }, BOGUS_KEY);
