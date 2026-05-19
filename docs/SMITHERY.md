@@ -18,7 +18,7 @@ display_name: Verity
 description: >
   Coordination, market integrity, and disinformation signals for AI trading
   agents. Six callable skills detect coordinated activity, flag manipulation
-  patterns, and cross-check claims against authoritative sources. Built for
+  patterns, and cross-check claims against monitored sources. Built for
   pre-trade decision workflows.
 publisher: Verity
 publisher_url: https://verityskills.com

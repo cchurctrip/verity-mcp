@@ -62,10 +62,11 @@ EXPECTED="coordination-heat,verity-score,morning-brief,verity-scan,cross-check-a
 [ "$TOOL_NAMES" = "$EXPECTED" ] || fail "tools/list returned unexpected tool set" "got: $TOOL_NAMES, expected: $EXPECTED"
 pass "tools/list returns 6 tools in fixed order"
 
-# Check 4: Anonymous coordination-heat. We do not assert the upstream body
+# Check 4: coordination-heat dispatch with no bearer (now auth-required; the
+# upstream returns 401 without a key). We do not assert the upstream body
 # because the smoke target may be a preview environment without upstream
 # wiring. We only assert the response shape is a valid JSON-RPC envelope.
-echo "Check 4: POST /mcp tools/call coordination-heat (anonymous)"
+echo "Check 4: POST /mcp tools/call coordination-heat (no bearer)"
 HEAT=$(curl -sS -m 30 -X POST "$BASE_URL/mcp" \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"coordination-heat","arguments":{"subject":"GME"}}}')

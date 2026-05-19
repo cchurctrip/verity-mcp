@@ -37,7 +37,7 @@
     },
     {
       "name": "cross-check-alert",
-      "description": "Cross-reference a claim against authoritative sources.",
+      "description": "Cross-reference a claim against monitored sources.",
       "requires_auth": true
     },
     {
