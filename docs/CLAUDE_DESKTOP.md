@@ -40,30 +40,13 @@ Anthropic does not yet support `claude://mcp/install` deep links. When they do, 
 
 Track Anthropic's MCP install-flow announcements at https://www.anthropic.com/news.
 
-## Anonymous use (no token)
+## API key required for every skill
 
-The `coordination-heat` tool accepts anonymous requests. To use Claude Desktop without an API key:
-
-```json
-{
-  "mcpServers": {
-    "verity": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-fetch",
-        "https://mcp.verityskills.com/mcp"
-      ]
-    }
-  }
-}
-```
-
-The other 5 tools will return 401 INVALID_BEARER_FORMAT (or upstream-401 UNAUTHORIZED) until a bearer is configured. `coordination-heat` works without auth.
+All six skills require a Verity API key. Issue one at https://verityskills.com/account/api-keys and configure it as the bearer token above. A request with no bearer (or a malformed one) returns 401 (INVALID_BEARER_FORMAT at the edge for a malformed header, or upstream UNAUTHORIZED when the header is absent).
 
 ## Troubleshooting
 
 - **Claude says "no tools available":** check the JSON is valid (no trailing commas) and Claude Desktop has been fully restarted, not just reloaded.
 - **All authenticated tools return 401:** verify the token starts with `vtk_` and contains no whitespace. The bearer regex is strict: `^Bearer vtk_[A-Za-z0-9]+$`.
-- **`coordination-heat` works but `verity-score` returns 402:** trial cap reached. The response includes an `upgrade_url`; visit it to upgrade to Pro or Fund tier.
+- **A tool returns 402:** trial cap reached. The response includes an `upgrade_url`; visit it to upgrade to Pro or Fund tier.
 - **The first call after a long idle returns slowly:** Cloudflare Worker cold start. First request on a new isolate takes 200-400ms; subsequent calls are sub-100ms.

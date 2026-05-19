@@ -387,7 +387,7 @@ describe('handleMcpRequest', () => {
     expect(capturedUrl).toBe('https://verityskills.com/api/skills/verity-score');
   });
 
-  it('tools/call with absent bearer + non-anonymous tool forwards (no x-verity-key) and surfaces upstream 401', async () => {
+  it('tools/call with absent bearer forwards (no x-verity-key) and surfaces upstream 401', async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response(JSON.stringify({ code: 'UNAUTHORIZED' }), {
         status: 401,

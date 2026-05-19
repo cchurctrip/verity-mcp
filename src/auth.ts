@@ -3,8 +3,9 @@
 // Contract (per VRT-146a spec hidden couplings #1, #7, #8):
 //
 //   readBearer(req).kind === 'absent'   -> no Authorization header
-//                                            caller forwards anonymously for coordination-heat,
-//                                            returns 401 at upstream for the other five tools.
+//                                            caller forwards with no x-verity-key; upstream
+//                                            returns its own 401 for every tool (all six now
+//                                            back authenticated operations).
 //   readBearer(req).kind === 'valid'    -> canonical Bearer vtk_<alphanumeric token>
 //                                            caller sets x-verity-key with result.token
 //                                            (no Bearer prefix on the upstream side, since
@@ -49,13 +50,13 @@ export function parseBearer(authValue: string): string | null {
 //   const b = readBearer(req);
 //   switch (b.kind) {
 //     case 'invalid': return invalidBearerFormat();
-//     case 'absent':  return tool === 'coordination-heat' ? forwardAnon() : missingBearer();
+//     case 'absent':  return forwardWithoutKey(); // upstream returns its own 401
 //     case 'valid':   return forwardAuthed(b.token);
 //   }
 //
 // TypeScript exhaustiveness checking on the kind discriminator forces the consumer to
-// handle every state. Adding a new tool that needs a different anonymous policy is a
-// switch-statement edit, not a regex change.
+// handle every state. If a future tool needs a distinct absent-key policy that becomes
+// a switch-statement edit, not a regex change.
 export function readBearer(req: Request): BearerResult {
   const auth = req.headers.get('authorization');
   if (auth === null) return { kind: 'absent' };

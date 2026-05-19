@@ -152,10 +152,10 @@ describe('Tool inputSchema invariants (Brand Rule #2 + marketplace contract)', (
     expect(snapshot).toEqual([
       ['coordination-heat', ['subject']],
       ['verity-score', ['subject']],
-      ['morning-brief', []],
+      ['morning-brief', ['watchlist']],
       ['verity-scan', ['subject']],
       ['cross-check-alert', ['claim']],
-      ['disinfo-alert', ['subject']],
+      ['disinfo-alert', ['subject', 'severity_threshold']],
     ]);
   });
 });

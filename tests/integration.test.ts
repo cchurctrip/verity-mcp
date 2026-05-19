@@ -60,13 +60,18 @@ async function callMcp(body: unknown, headers: Record<string, string> = {}): Pro
 describe('tools/call: happy path for each of the 6 tools', () => {
   // upstreamBody is typed as Record<string, unknown> (not unknown) because
   // fetchMock.reply expects object | string | Buffer for its body parameter.
+  // upstreamPath values mirror src/upstream.ts TOOL_ROUTES. Three tools now
+  // forward to the newer marketed operations (subject scorer, claim
+  // corroborator, ongoing monitor). coordination-heat now backs an
+  // authenticated operation, so the happy-path case carries a bearer like
+  // the other five.
   const cases: ReadonlyArray<{ name: string; upstreamPath: string; auth?: string; upstreamBody: Record<string, unknown> }> = [
-    { name: 'coordination-heat', upstreamPath: '/api/skills/coordination-heat', upstreamBody: { heat: 0.42 } },
+    { name: 'coordination-heat', upstreamPath: '/api/skills/coordination-score', auth: 'Bearer vtk_a', upstreamBody: { score: 42 } },
     { name: 'verity-score', upstreamPath: '/api/skills/verity-score', auth: 'Bearer vtk_a', upstreamBody: { score: 87 } },
     { name: 'morning-brief', upstreamPath: '/api/skills/morning-brief', auth: 'Bearer vtk_a', upstreamBody: { sections: [] } },
     { name: 'verity-scan', upstreamPath: '/api/skills/verity-scan', auth: 'Bearer vtk_a', upstreamBody: { verdict: 'clear' } },
-    { name: 'cross-check-alert', upstreamPath: '/api/skills/cross-check-alert', auth: 'Bearer vtk_a', upstreamBody: { sources: [] } },
-    { name: 'disinfo-alert', upstreamPath: '/api/skills/disinfo-alert', auth: 'Bearer vtk_a', upstreamBody: { strength: 'low' } },
+    { name: 'cross-check-alert', upstreamPath: '/api/skills/cross-check-claim', auth: 'Bearer vtk_a', upstreamBody: { verdict: 'NO_SIGNAL' } },
+    { name: 'disinfo-alert', upstreamPath: '/api/skills/disinfo-monitor', auth: 'Bearer vtk_a', upstreamBody: { detected: false } },
   ];
 
   it.each(cases)('$name forwards upstream 200 as JSON-RPC result', async (tc) => {

@@ -129,9 +129,22 @@ describe('isKnownTool + TOOL_ROUTES', () => {
     ]);
   });
 
-  it('every tool route is /api/skills/<tool>', () => {
-    for (const [name, path] of Object.entries(TOOL_ROUTES)) {
-      expect(path).toBe(`/api/skills/${name}`);
+  // Tool names are the stable marketed surface; route paths are decoupled.
+  // Three tools forward to the newer marketed operations whose path differs
+  // from the tool name. This test pins the exact name -> path map so a
+  // routing typo still fails, and asserts every value is a well-formed
+  // /api/skills/<slug> path.
+  it('every tool route maps to its pinned upstream skill path', () => {
+    expect(TOOL_ROUTES).toEqual({
+      'coordination-heat': '/api/skills/coordination-score',
+      'verity-score': '/api/skills/verity-score',
+      'morning-brief': '/api/skills/morning-brief',
+      'verity-scan': '/api/skills/verity-scan',
+      'cross-check-alert': '/api/skills/cross-check-claim',
+      'disinfo-alert': '/api/skills/disinfo-monitor',
+    });
+    for (const path of Object.values(TOOL_ROUTES)) {
+      expect(path).toMatch(/^\/api\/skills\/[a-z][a-z-]*[a-z]$/);
     }
   });
 
@@ -333,11 +346,15 @@ describe('proxyToolCall', () => {
     expect(capturedHeaders?.get('x-verity-key')?.startsWith('Bearer')).toBe(false);
   });
 
-  it('forwards an absent bearer WITHOUT x-verity-key (anonymous path)', async () => {
+  it('forwards an absent bearer WITHOUT x-verity-key (upstream returns its own 401)', async () => {
+    // The Worker stays thin: an absent bearer forwards with no x-verity-key
+    // for every tool and upstream decides the status. coordination-heat now
+    // backs an authenticated operation, so upstream would return 401 in
+    // production; the assertion here is purely the header-build behavior.
     let capturedHeaders: Headers | undefined;
     const fetchSpy = async (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       capturedHeaders = init?.headers as Headers;
-      return mockResponse(200, { ok: true });
+      return mockResponse(401, { code: 'UNAUTHORIZED' });
     };
     await proxyToolCall('coordination-heat', {}, absentAuth, REQUEST_ID, {}, fetchSpy);
     expect(capturedHeaders?.get('x-verity-key')).toBeNull();

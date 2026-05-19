@@ -293,3 +293,30 @@ readBearer from src/auth.ts (merged at d9f77d1) returns the BearerResult discrim
 **Top priority across all projects**: ship `mcp.verityskills.com` live (Block A owner work). Verity needs to be agent-discoverable before any other distribution lever lights up.
 
 ---
+
+---
+
+## Checkpoint — 2026-05-19 (VRT-149f pre-implementation)
+
+**Active task:** Align all 6 verity-mcp Worker tool defs + manifest + manifest schema check + manifest snapshot test to the new upstream contracts merged on cchurctrip/verity origin/main, plus 6 live e2e contract tests.
+
+**Approved spec:** docs/specs/2026-05-19_VRT-149f_worker-contract-alignment.md (owner approval pre-granted, B-full + amendments on verity main, autonomous execution authorized per parent brief).
+
+**Files to be modified:**
+- src/upstream.ts (TOOL_ROUTES: coordination-heat -> coordination-score, cross-check-alert -> cross-check-claim, disinfo-alert -> disinfo-monitor)
+- src/tools/coordination-heat.ts (requiresAuth false -> true, new path)
+- src/tools/cross-check-alert.ts (path -> cross-check-claim, 4-value verdict in description)
+- src/tools/disinfo-alert.ts (path -> disinfo-monitor, severity_threshold required)
+- src/tools/morning-brief.ts (required ["watchlist"], drop date, pin maxItems to pro tier=50)
+- src/tools/verity-score.ts, verity-scan.ts (descriptions accurate; paths unchanged)
+- manifest.json (coordination-heat requires_auth true, anonymous_tools [])
+- scripts/check-manifest-schema.sh (relax coordination-heat-anon assertion)
+- tests/manifest.snapshot.test.ts (required-array snapshot)
+- tests/integration.test.ts (happy-path upstreamPath strings; coordination-heat needs auth)
+- tests/e2e/live-contract.test.ts (NEW, env-gated skip on VERITY_MCP_TEST_KEY)
+
+**Already done:** spec written, all upstream contracts verified against verity origin/main.
+
+**Next step if resuming:** Start at step 1 (src/upstream.ts TOOL_ROUTES) per spec Plan section.
+
+**Context:** coordination-heat flips to auth-required because the new coordination-score route is Pro/Fund/Trial-gated (verified at app/api/skills/coordination-score/route.ts on verity origin/main). Tool NAME preserved per B-full. The spec appendix "(anonymous allowed)" label is the stale pre-rename leaderboard probe; brief explicitly routes the tool to the new auth-gated subject scorer. check-manifest-schema.sh is CI-blocking and must be relaxed in the same diff for internal coherence.

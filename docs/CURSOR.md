@@ -20,8 +20,8 @@ and flag manipulation patterns. Pre-trade integrity check for AI workflows.
 
 - **URL:** https://mcp.verityskills.com/mcp
 - **Repo:** https://github.com/cchurctrip/verity-mcp
-- **Auth:** Bearer token at https://verityskills.com/account/api-keys
-- **Anonymous tools:** coordination-heat
+- **Auth:** Bearer token at https://verityskills.com/account/api-keys (every skill)
+- **Anonymous tools:** none
 - **Categories:** finance, research, data
 ```
 

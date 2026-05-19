@@ -12,13 +12,13 @@
     "header": "Authorization",
     "value_format": "Bearer <vtk_token>",
     "obtain_url": "https://verityskills.com/account/api-keys",
-    "anonymous_tools": ["coordination-heat"]
+    "anonymous_tools": []
   },
   "tools": [
     {
       "name": "coordination-heat",
-      "description": "Detect coordinated activity around a topic, ticker, or narrative.",
-      "requires_auth": false
+      "description": "Score a topic, ticker, or narrative for coordinated activity.",
+      "requires_auth": true
     },
     {
       "name": "verity-score",
@@ -37,12 +37,12 @@
     },
     {
       "name": "cross-check-alert",
-      "description": "Cross-reference a claim against authoritative sources.",
+      "description": "Cross-reference a claim against monitored sources.",
       "requires_auth": true
     },
     {
       "name": "disinfo-alert",
-      "description": "Flag potential disinformation patterns and coordinated narratives.",
+      "description": "Monitor a topic or ticker for disinformation patterns and coordinated narratives.",
       "requires_auth": true
     }
   ],

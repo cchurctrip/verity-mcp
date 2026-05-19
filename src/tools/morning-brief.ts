@@ -1,5 +1,14 @@
 import type { Tool } from './index';
 
+// maxItems below is pinned to the upstream Pro-tier watchlist ceiling
+// (currently 50). Upstream derives its max from the Pro watchlist tier
+// limit, so this Worker number MUST equal that tier value. If the upstream
+// Pro watchlist tier limit changes, this literal has to change in lockstep
+// or a marketplace consumer that builds a form/validator off this schema
+// will silently diverge from what upstream accepts. Do not bump one without
+// the other.
+const MORNING_BRIEF_MAX_WATCHLIST = 50;
+
 export const morningBrief = {
   name: 'morning-brief',
   description:
@@ -10,18 +19,13 @@ export const morningBrief = {
       watchlist: {
         type: 'array',
         items: { type: 'string' },
-        maxItems: 50,
+        minItems: 1,
+        maxItems: MORNING_BRIEF_MAX_WATCHLIST,
         description:
-          'List of tickers or topic phrases. Optional. Omit to use your default watchlist.',
-      },
-      date: {
-        type: 'string',
-        format: 'date',
-        description:
-          'Briefing date in YYYY-MM-DD form. Optional. Defaults to the current trading day.',
+          'Tickers or topic phrases to brief on. Required: a non-empty list.',
       },
     },
-    required: [],
+    required: ['watchlist'],
     additionalProperties: false,
   },
   requiresAuth: true,

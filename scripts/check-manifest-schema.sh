@@ -58,9 +58,24 @@ if [ "$AUTH_TYPE" != "bearer" ]; then
   exit 1
 fi
 
-ANON_TOOLS=$(jq -r '.auth.anonymous_tools | tojson' "$MANIFEST")
-if ! echo "$ANON_TOOLS" | grep -q "coordination-heat"; then
-  echo "[manifest-schema] FAIL: auth.anonymous_tools must include 'coordination-heat', got $ANON_TOOLS"
+# auth.anonymous_tools must be a JSON array. It may be empty: every tool now
+# backs an authenticated upstream operation, so the anonymous list is
+# expected to be []. Any entry, if present, must be one of the advertised
+# tool names. The previous "must include coordination-heat" assertion was
+# removed when coordination-heat moved to an authenticated subject scorer;
+# the manifest snapshot test enforces anonymous_tools <-> requiresAuth parity.
+if ! jq -e '.auth.anonymous_tools | type == "array"' "$MANIFEST" >/dev/null; then
+  echo "[manifest-schema] FAIL: auth.anonymous_tools must be a JSON array"
+  exit 1
+fi
+UNKNOWN_ANON=$(jq -r '
+  (.tools | map(.name)) as $names
+  | (.auth.anonymous_tools // [])
+  | map(select(. as $a | ($names | index($a)) | not))
+  | join(",")
+' "$MANIFEST")
+if [ -n "$UNKNOWN_ANON" ]; then
+  echo "[manifest-schema] FAIL: auth.anonymous_tools has unknown tool name(s): $UNKNOWN_ANON"
   exit 1
 fi
 
