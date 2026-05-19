@@ -4,9 +4,9 @@
 // Per VRT-146a spec § Plan/Phase 2 src/upstream.ts and hidden couplings:
 //
 //   #1 readBearer({ kind: 'invalid' })  -> 401 INVALID_BEARER_FORMAT at Worker edge
-//      readBearer({ kind: 'absent' })   -> forward without x-verity-key; upstream returns 401
-//                                          for non-anonymous tools, anonymous proxy for
-//                                          coordination-heat per VRT-098 policy
+//      readBearer({ kind: 'absent' })   -> forward without x-verity-key; upstream
+//                                          returns its own 401 for every tool (all
+//                                          six now back authenticated operations)
 //      readBearer({ kind: 'valid' })    -> set x-verity-key to the raw vtk_ token
 //
 //   #2 402 dual-shape rewrite: typical (upgrade_url + calls_used + calls_remaining)
@@ -45,21 +45,31 @@ export const UPGRADE_URL_ABSOLUTE = 'https://verityskills.com/upgrade?return_to=
 const UPSTREAM_FETCH_TIMEOUT_MS = 30_000;
 
 // The six MCP tools mapped one-to-one to main-repo skill routes. Tool names
-// MUST match manifest.json.tools[].name; route paths MUST match the existing
-// app/api/skills/<name>/route.ts files. Adding a tool here is one of three
-// places to update (also manifest.json + src/tools/<name>.ts).
+// MUST match manifest.json.tools[].name. Tool names are the stable marketed
+// surface and are deliberately decoupled from the route paths: three tools
+// now forward to newer marketed operations whose path differs from the tool
+// name (the subject scorer, the claim corroborator, the ongoing monitor).
+// The previous route paths still exist upstream as transparent in-process
+// delegating aliases (no redirect, no Location header, no 3xx) but the Worker
+// forwards to the new marketed operations because that is what the tool
+// descriptions advertise. Adding a tool here is one of three places to update
+// (also manifest.json + src/tools/<name>.ts).
 //
 // `as const satisfies` lock-in: keeps the literal record narrow so `ToolName`
 // is the exact union of the 6 names. A new tool name added to manifest.json
 // but missing here becomes a compile error wherever the consumer imports
 // `ToolName`.
+//
+// coordination-heat forwards to the free-text subject scorer, which requires
+// an authenticated key (see src/tools/coordination-heat.ts requiresAuth and
+// manifest.json). It is no longer an anonymous tool.
 export const TOOL_ROUTES = {
-  'coordination-heat': '/api/skills/coordination-heat',
+  'coordination-heat': '/api/skills/coordination-score',
   'verity-score':      '/api/skills/verity-score',
   'morning-brief':     '/api/skills/morning-brief',
   'verity-scan':       '/api/skills/verity-scan',
-  'cross-check-alert': '/api/skills/cross-check-alert',
-  'disinfo-alert':     '/api/skills/disinfo-alert',
+  'cross-check-alert': '/api/skills/cross-check-claim',
+  'disinfo-alert':     '/api/skills/disinfo-monitor',
 } as const satisfies Record<string, string>;
 
 export type ToolName = keyof typeof TOOL_ROUTES;
@@ -183,11 +193,13 @@ export async function proxyToolCall(
     return { kind: 'bearer_invalid' };
   }
 
-  // For absent-bearer + non-anonymous tool, the spec is explicit: forward
-  // anyway without x-verity-key and let upstream return 401. Keeps the
-  // Worker thin and single-source-of-auth-truth. coordination-heat handles
-  // anonymous specially upstream via VRT-098 policy. Both cases use the
-  // same headers (no x-verity-key) so no special-case here.
+  // For an absent bearer, the spec is explicit: forward anyway without
+  // x-verity-key and let upstream decide the status. Keeps the Worker thin
+  // and single-source-of-auth-truth. All six tools now back authenticated
+  // operations (the former anonymous coordination rollup was replaced by the
+  // authenticated subject scorer), so an absent key forwards with no
+  // x-verity-key and upstream returns its own 401. No per-tool special case
+  // is needed here: the header-build path is uniform.
   const headers = buildUpstreamHeaders(auth, requestId);
   const url = `${UPSTREAM_BASE}${TOOL_ROUTES[toolName]}`;
 

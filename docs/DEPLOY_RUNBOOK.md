@@ -89,12 +89,13 @@ curl -sS -X POST "$PREVIEW_URL/mcp" \
   | python3 -m json.tool
 # Expect: result.tools array with the 6 advertised tools
 
-# 4. Anonymous coordination-heat
+# 4. coordination-heat with no bearer -> upstream 401 (every tool needs a key now)
 curl -sS -X POST "$PREVIEW_URL/mcp" \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"coordination-heat","arguments":{"subject":"GME"}}}' \
   | python3 -m json.tool
-# Expect: forward of the upstream verityskills.com coordination-heat response
+# Expect: forward of the upstream 401 (no x-verity-key sent). Re-run with
+# -H 'authorization: Bearer vtk_<your-token>' to get a scored response.
 
 # 5. Authenticated verity-score (replace vtk_ token with a real one)
 curl -sS -X POST "$PREVIEW_URL/mcp" \

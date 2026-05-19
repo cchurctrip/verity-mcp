@@ -38,13 +38,12 @@ categories:
 auth:
   type: bearer
   obtain_url: https://verityskills.com/account/api-keys
-  anonymous_tools:
-    - coordination-heat
+  anonymous_tools: []
 
 tools:
   - name: coordination-heat
-    description: Detect coordinated activity around a topic, ticker, or narrative.
-    requires_auth: false
+    description: Score a topic, ticker, or narrative for coordinated activity.
+    requires_auth: true
   - name: verity-score
     description: Composite integrity score for a market subject.
     requires_auth: true
@@ -55,10 +54,10 @@ tools:
     description: Real-time scan of a topic, ticker, or claim. Pre-trade check.
     requires_auth: true
   - name: cross-check-alert
-    description: Cross-reference a claim against authoritative sources.
+    description: Cross-reference a claim against monitored sources.
     requires_auth: true
   - name: disinfo-alert
-    description: Flag potential disinformation patterns and coordinated narratives.
+    description: Monitor a topic or ticker for disinformation patterns and coordinated narratives.
     requires_auth: true
 
 icon: https://verityskills.com/icon-256.png
@@ -101,4 +100,4 @@ Smithery reviews submissions manually (typical turnaround: 1-3 business days). W
 
 ## If rejected
 
-Smithery typically rejects for: missing screenshot, vague description, no working endpoint, or auth flow that doesn't match the manifest claim. The most common feedback is "your endpoint requires auth for tools/list but the manifest says it's anonymous." Verify: `curl -sS -X POST https://mcp.verityskills.com/mcp -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'` should work without an Authorization header. (It does today; `tools/list` does not require auth in our spec.)
+Smithery typically rejects for: missing screenshot, vague description, no working endpoint, or an auth flow that does not match the manifest claim. Discovery must stay open even though every tool call needs a key: `tools/list` is unauthenticated so a directory crawler can enumerate the tools. Verify: `curl -sS -X POST https://mcp.verityskills.com/mcp -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'` returns the tool list without an Authorization header. (It does today; `tools/list` does not require auth in our spec. Every `tools/call` does.)

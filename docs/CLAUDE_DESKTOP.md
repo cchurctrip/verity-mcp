@@ -40,26 +40,9 @@ Anthropic does not yet support `claude://mcp/install` deep links. When they do, 
 
 Track Anthropic's MCP install-flow announcements at https://www.anthropic.com/news.
 
-## Anonymous use (no token)
+## API key required for every skill
 
-The `coordination-heat` tool accepts anonymous requests. To use Claude Desktop without an API key:
-
-```json
-{
-  "mcpServers": {
-    "verity": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-fetch",
-        "https://mcp.verityskills.com/mcp"
-      ]
-    }
-  }
-}
-```
-
-The other 5 tools will return 401 INVALID_BEARER_FORMAT (or upstream-401 UNAUTHORIZED) until a bearer is configured. `coordination-heat` works without auth.
+All six skills require a Verity API key. Issue one at https://verityskills.com/account/api-keys and configure it as the bearer token above. A request with no bearer (or a malformed one) returns 401 (INVALID_BEARER_FORMAT at the edge for a malformed header, or upstream UNAUTHORIZED when the header is absent).
 
 ## Troubleshooting
 

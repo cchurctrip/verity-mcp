@@ -8,7 +8,7 @@ Public MCP (Model Context Protocol) server for [Verity](https://verityskills.com
 
 ApeWisdom has a dashboard. StockTwits has a feed. Verity has skills. The pre-trade integrity check most AI workflows are missing. Connect once; every Verity capability becomes a function call from inside your Claude, Cursor, LangChain, or LlamaIndex workflow.
 
-The first skill (`coordination-heat`) is anonymous so you can try the wire without an account.
+Every skill needs a Verity API key. Issue one in seconds at https://verityskills.com/account/api-keys.
 
 ## Install
 
@@ -60,6 +60,7 @@ Restart Cursor. See `docs/CURSOR.md` for the full guide.
 ```bash
 curl -sS -X POST https://mcp.verityskills.com/mcp \
   -H 'content-type: application/json' \
+  -H 'Authorization: Bearer vtk_your_key_here' \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -71,22 +72,22 @@ curl -sS -X POST https://mcp.verityskills.com/mcp \
   }'
 ```
 
-The `coordination-heat` skill is anonymous. The other five require an API key issued at https://verityskills.com/account/api-keys.
+All six skills require an API key issued at https://verityskills.com/account/api-keys.
 
 ### Other agent runtimes
 
-Any MCP-compliant agent runtime works. The endpoint is `https://mcp.verityskills.com/mcp` over HTTP+SSE (the SSE channel is a future addition; HTTP POST works today). Add `Authorization: Bearer vtk_<token>` for the five paid skills.
+Any MCP-compliant agent runtime works. The endpoint is `https://mcp.verityskills.com/mcp` over HTTP+SSE (the SSE channel is a future addition; HTTP POST works today). Add `Authorization: Bearer vtk_<token>` for every skill.
 
 ## Available skills
 
 | Skill | Auth | Capability |
 |---|---|---|
-| `coordination-heat` | Anonymous OK | Detect coordinated activity around a topic, ticker, or narrative. |
+| `coordination-heat` | Required | Score a topic, ticker, or narrative for coordinated activity. |
 | `verity-score` | Required | Composite integrity score for a market subject. |
 | `morning-brief` | Required | Daily briefing of overnight signals across a watchlist. |
 | `verity-scan` | Required | Real-time scan of a topic, ticker, or claim. |
-| `cross-check-alert` | Required | Cross-reference a claim against authoritative sources. |
-| `disinfo-alert` | Required | Flag potential disinformation patterns. |
+| `cross-check-alert` | Required | Cross-reference a claim against monitored sources. |
+| `disinfo-alert` | Required | Monitor a topic or ticker for disinformation patterns. |
 
 ## Marketplace listings
 

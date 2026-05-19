@@ -3,7 +3,7 @@ import type { Tool } from './index';
 export const coordinationHeat = {
   name: 'coordination-heat',
   description:
-    'Detect coordinated activity around a topic, ticker, or narrative across public social platforms. Returns an intensity score with contributing source signals. Anonymous use permitted for public market subjects.',
+    'Score a topic, ticker, or narrative for coordinated activity across public social platforms. Distinguishes organic chatter from manufactured campaigns: identical phrasing across many posts, new-account clusters, synchronized posting windows. Returns a heat score with a band and the contributing signal counts.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -12,17 +12,10 @@ export const coordinationHeat = {
         description:
           'Ticker symbol, topic phrase, or named narrative to score. Examples: GME, "AI energy demand", "Iran ceasefire".',
       },
-      window_hours: {
-        type: 'integer',
-        minimum: 1,
-        maximum: 168,
-        description:
-          'Lookback window in hours. Defaults to 24 if omitted.',
-      },
     },
     required: ['subject'],
     additionalProperties: false,
   },
-  requiresAuth: false,
-  upstreamPath: '/api/skills/coordination-heat',
+  requiresAuth: true,
+  upstreamPath: '/api/skills/coordination-score',
 } as const satisfies Tool;

@@ -122,7 +122,8 @@ describe('readBearer tri-state classifier', () => {
   it('returns { kind: "invalid" } on empty-string Authorization (header present, value empty)', () => {
     // Pins finding R5: empty string is "present but malformed" (regex miss), NOT "absent".
     // A future runtime change that normalizes empty -> absent would silently flip this
-    // from 401 INVALID_BEARER_FORMAT to anonymous proxy; this test catches the regression.
+    // from 401 INVALID_BEARER_FORMAT (Worker edge) to a forward-without-key path;
+    // this test catches the regression.
     expect(readBearer(reqWith('')).kind).toBe('invalid');
   });
 
