@@ -16,6 +16,21 @@ export const verityScan = {
     required: ['subject'],
     additionalProperties: false,
   },
+  // VRT-160: success-shape with `status` discriminator per VRT-159.
+  // verity-scan has a single success branch (no degenerate case).
+  outputSchema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['ok'] },
+      tickers_checked: { type: 'array', items: { type: 'string' } },
+      scan_window_hours: { type: 'number' },
+      anomalies: { type: 'array' },
+      clean: { type: 'array', items: { type: 'string' } },
+      anomaly_count: { type: 'number' },
+      scanned_at: { type: 'string' },
+    },
+    required: ['status', 'tickers_checked', 'anomalies', 'clean', 'anomaly_count', 'scanned_at'],
+  },
   requiresAuth: true,
   upstreamPath: '/api/skills/verity-scan',
 } as const satisfies Tool;

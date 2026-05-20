@@ -28,6 +28,19 @@ export const morningBrief = {
     required: ['watchlist'],
     additionalProperties: false,
   },
+  // VRT-160: success-shape with `status` discriminator per VRT-159.
+  // morning-brief has a single success branch.
+  outputSchema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['ok'] },
+      variant: { type: 'string' },
+      subject: { type: 'string' },
+      tickers: { type: 'array' },
+      asof: { type: 'string' },
+    },
+    required: ['status', 'variant', 'subject', 'tickers', 'asof'],
+  },
   requiresAuth: true,
   upstreamPath: '/api/skills/morning-brief',
 } as const satisfies Tool;
