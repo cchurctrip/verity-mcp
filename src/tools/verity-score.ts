@@ -16,6 +16,35 @@ export const verityScore = {
     required: ['subject'],
     additionalProperties: false,
   },
+  // VRT-160: discriminated union on `status` per VRT-159. Consumers branch on
+  // status to handle every success case exhaustively.
+  outputSchema: {
+    oneOf: [
+      {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['ok'] },
+          ticker: { type: 'string' },
+          score: { type: 'number' },
+          breakdown: { type: 'object' },
+          explanation: { type: 'string' },
+          asof: { type: 'string' },
+        },
+        required: ['status', 'ticker', 'score', 'explanation', 'asof'],
+      },
+      {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['insufficient_data'] },
+          ticker: { type: 'string' },
+          score: { type: 'null' },
+          explanation: { type: 'string' },
+          asof: { type: ['string', 'null'] },
+        },
+        required: ['status', 'ticker', 'score', 'explanation', 'asof'],
+      },
+    ],
+  },
   requiresAuth: true,
   upstreamPath: '/api/skills/verity-score',
 } as const satisfies Tool;

@@ -19,7 +19,7 @@
 //   - Every TOOLS[].requiresAuth matches the manifest entry.
 
 import { describe, expect, it } from 'vitest';
-import { TOOLS } from '../src/tools';
+import { TOOLS, type Tool } from '../src/tools';
 import { TOOL_ROUTES } from '../src/upstream';
 import manifest from '../manifest.json';
 
@@ -157,5 +157,42 @@ describe('Tool inputSchema invariants (Brand Rule #2 + marketplace contract)', (
       ['cross-check-alert', ['claim']],
       ['disinfo-alert', ['subject', 'severity_threshold']],
     ]);
+  });
+
+  // VRT-160: assert outputSchema is present on the 3 tools whose upstream
+  // response shape gained a `status` discriminator in VRT-159. The other 3
+  // tools may add outputSchema later; absence is intentional today.
+  // The TOOLS literal type is narrowed by `as const satisfies` so each
+  // element's type does not include the optional outputSchema field. Widen
+  // to Tool[] for the regression-guard assertions below.
+  const ALL_TOOLS: ReadonlyArray<Tool> = TOOLS as ReadonlyArray<Tool>;
+
+  it('outputSchema present on verity-score, verity-scan, morning-brief (VRT-160)', () => {
+    const withOutputSchema = ALL_TOOLS.filter((t) => t.outputSchema !== undefined).map((t) => t.name);
+    expect([...withOutputSchema].sort()).toEqual(['morning-brief', 'verity-scan', 'verity-score']);
+  });
+
+  it("verity-score outputSchema describes a discriminated union on status (VRT-160)", () => {
+    const t = ALL_TOOLS.find((x) => x.name === 'verity-score');
+    expect(t?.outputSchema).toBeDefined();
+    const schema = t!.outputSchema as {
+      oneOf: ReadonlyArray<{ properties: { status: { enum: ReadonlyArray<string> } } }>;
+    };
+    expect(schema.oneOf).toHaveLength(2);
+    const statusValues = schema.oneOf.map((b) => b.properties.status.enum[0]).sort();
+    expect(statusValues).toEqual(['insufficient_data', 'ok']);
+  });
+
+  it("verity-scan + morning-brief outputSchema require status:'ok' (VRT-160)", () => {
+    for (const name of ['verity-scan', 'morning-brief'] as const) {
+      const t = ALL_TOOLS.find((x) => x.name === name);
+      expect(t?.outputSchema).toBeDefined();
+      const schema = t!.outputSchema as {
+        properties: { status: { enum: ReadonlyArray<string> } };
+        required: ReadonlyArray<string>;
+      };
+      expect([...schema.properties.status.enum]).toEqual(['ok']);
+      expect(schema.required).toContain('status');
+    }
   });
 });

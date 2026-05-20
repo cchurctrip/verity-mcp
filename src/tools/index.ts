@@ -19,6 +19,12 @@ export interface Tool {
   name: string;
   description: string;
   inputSchema: object;
+  // VRT-160: optional JSON Schema for the tool's success response shape.
+  // Present on tools whose upstream success response forms a discriminated
+  // union (currently verity-score, verity-scan, morning-brief per VRT-159).
+  // Other tools may add it later; consumers should treat absence as
+  // 'shape unspecified, parse defensively'.
+  outputSchema?: object;
   requiresAuth: boolean;
   upstreamPath: string;
 }
