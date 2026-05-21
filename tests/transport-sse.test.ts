@@ -284,19 +284,23 @@ describe('GET /sse legacy bridge handshake (integration, VRT-165)', () => {
 });
 
 describe('POST /sse cross-isolate fallback (integration, MCP 2024-11-05 6.2.2)', () => {
-  it('without an open GET /sse stream for this bearer: HTTP 202 + envelope in body (fallback path)', async () => {
-    // No GET /sse opened first; the POST cannot relay to a stream and
-    // falls back to inline envelope per MCP 2024-11-05 section 6.2.2.
+  it('valid bearer with no open GET /sse stream in this isolate: 200 + envelope inline (MCP 2024-11-05 6.2.2 fallback)', async () => {
+    // Pins the relay-not-found fallback: a valid bearer is present, the
+    // dispatch returns status 200, but no GET /sse for this bearer-hash
+    // exists in this isolate. relaySsePostToStream returns 'no_stream'
+    // and the caller falls back to inline JSON per the spec.
     //
-    // BUT: the relay-or-fallback decision only happens for status === 200
-    // outcomes. The initialize method always returns 200, so it exercises
-    // the fallback cleanly. The fallback path returns the envelope as
-    // application/json with status === result.status (200 for initialize).
+    // The bearer fixture is alphanumeric-only on purpose: the regex
+    // `^Bearer (vtk_[A-Za-z0-9]+)` rejects underscores after the vtk_
+    // prefix, so a fixture like 'vtk_no_open_stream' would route through
+    // readBearer's invalid branch and exercise the no-bearer fallback
+    // (the next test below) by accident. Bugbot caught the prior fixture
+    // string in iter 3 of PR #14.
     const res = await SELF.fetch('http://example.com/sse', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        Authorization: 'Bearer vtk_no_open_stream',
+        Authorization: 'Bearer vtk_validNoStream1234',
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
