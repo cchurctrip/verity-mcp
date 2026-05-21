@@ -159,14 +159,37 @@ describe('buildToolsListResult', () => {
     ]);
   });
 
-  it('every entry has the four advertised fields and nothing else', () => {
+  it('every entry has the four required fields, plus optional outputSchema, and nothing else', () => {
     const { tools } = buildToolsListResult();
+    const ALLOWED_KEYS = new Set(['description', 'inputSchema', 'name', 'requiresAuth', 'outputSchema']);
     for (const t of tools) {
-      expect(Object.keys(t).sort()).toEqual(['description', 'inputSchema', 'name', 'requiresAuth']);
+      // No unknown fields (catches a future field that should not surface).
+      for (const k of Object.keys(t)) {
+        expect(ALLOWED_KEYS.has(k), `unexpected key ${k} on tool ${t.name}`).toBe(true);
+      }
+      // The four required fields are always present.
+      expect(typeof t.name).toBe('string');
       expect(typeof t.description).toBe('string');
       expect(typeof t.inputSchema).toBe('object');
       expect(typeof t.requiresAuth).toBe('boolean');
+      // outputSchema is optional. When present it is an object.
+      if ('outputSchema' in t) {
+        expect(typeof t.outputSchema).toBe('object');
+      }
     }
+  });
+
+  it('outputSchema flows through to tools/list on the 3 VRT-160 tools', () => {
+    const { tools } = buildToolsListResult();
+    const withOutputSchema = tools.filter((t) => 'outputSchema' in t).map((t) => t.name);
+    // Per VRT-160 + the source-of-truth assertion in tests/manifest.snapshot.test.ts.
+    expect([...withOutputSchema].sort()).toEqual(['morning-brief', 'verity-scan', 'verity-score']);
+  });
+
+  it('outputSchema is absent on the 3 tools that did not declare one (no spurious empty object)', () => {
+    const { tools } = buildToolsListResult();
+    const noOutputSchema = tools.filter((t) => !('outputSchema' in t)).map((t) => t.name);
+    expect([...noOutputSchema].sort()).toEqual(['coordination-heat', 'cross-check-alert', 'disinfo-alert']);
   });
 
   it('does NOT expose upstreamPath through tools/list (proxy detail stays internal)', () => {
