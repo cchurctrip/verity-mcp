@@ -6,8 +6,8 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --env production",
-    "deploy:preview": "wrangler deploy --env preview",
+    "deploy": "wrangler deploy --env production --var COMMIT_SHA:$(git rev-parse HEAD)",
+    "deploy:preview": "wrangler deploy --env preview --var COMMIT_SHA:$(git rev-parse HEAD)",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

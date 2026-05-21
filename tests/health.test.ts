@@ -20,6 +20,17 @@ describe('GET /health', () => {
     expect(typeof body['kill_switch_engaged']).toBe('boolean');
     expect(body['kill_switch_engaged']).toBe(false);
   });
+
+  it('commit defaults to "unknown" when COMMIT_SHA env var is not stamped at deploy time', async () => {
+    // The vitest-pool-workers env in wrangler.toml does not set COMMIT_SHA,
+    // so the handler's `env.COMMIT_SHA ?? 'unknown'` fallback fires. This
+    // pins the documented degraded-mode behaviour (and confirms the npm
+    // `deploy` script's `--var COMMIT_SHA:$(git rev-parse HEAD)` is the
+    // only path that gives /health a real SHA in production).
+    const res = await SELF.fetch('http://example.com/health');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['commit']).toBe('unknown');
+  });
 });
 
 describe('OPTIONS preflight', () => {
