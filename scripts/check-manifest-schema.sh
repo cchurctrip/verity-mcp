@@ -76,6 +76,12 @@ if [ "$STREAMABLE_URL" != "$SERVER_URL_FOR_TRANSPORTS" ]; then
   echo "[manifest-schema] FAIL: transports streamable-http url ($STREAMABLE_URL) must equal server_url ($SERVER_URL_FOR_TRANSPORTS)"
   exit 1
 fi
+# Pin the sse url to the production /sse origin so a future edit cannot point
+# the legacy bridge at localhost or a non-verityskills domain.
+if [ "$SSE_URL" != "https://mcp.verityskills.com/sse" ]; then
+  echo "[manifest-schema] FAIL: transports sse url must be 'https://mcp.verityskills.com/sse', got '$SSE_URL'"
+  exit 1
+fi
 
 AUTH_TYPE=$(jq -r '.auth.type' "$MANIFEST")
 if [ "$AUTH_TYPE" != "bearer" ]; then

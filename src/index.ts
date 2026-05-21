@@ -170,12 +170,18 @@ const handler = {
       // errors (status !== 200) and bearer-absent/invalid cases skip the
       // relay and respond with the envelope inline so the client sees the
       // right HTTP status on its retry layer.
+      //
+      // The relay returns a three-valued outcome so a "no open stream"
+      // (the documented cross-isolate fallback) is distinguishable in logs
+      // from a "stream open but write errored" (a real anomaly worth
+      // investigating). Both fall back to the inline-envelope response;
+      // only the log lines differ.
       if (result.status === 200) {
         const auth = readBearer(req);
         if (auth.kind === 'valid') {
           const bearerHash = await sha256HexBearer(auth.token);
-          const relayed = await relaySsePostToStream(result.body, bearerHash);
-          if (relayed) {
+          const relayOutcome = await relaySsePostToStream(result.body, bearerHash);
+          if (relayOutcome === 'relayed') {
             return new Response(null, { status: 202, headers: CORS_HEADERS });
           }
         }

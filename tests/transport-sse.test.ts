@@ -94,14 +94,15 @@ describe('sha256HexBearer: shape + determinism', () => {
   });
 
   it('different bearers do not collide on the first 8 hex chars (collision invariant)', async () => {
-    // fast-check property: generate pairs of distinct bearers; the first
-    // 8 hex characters of their digests differ. SHA-256 makes 8-hex
-    // (32-bit) collisions birthday-bound at ~65k bearers; the test
-    // exercises a few hundred pairs so a collision is exceedingly
-    // unlikely on a healthy implementation. A regression that truncated
-    // the key to 8 hex chars would still pass this test occasionally;
-    // the stronger guarantee lives in the integration test that pins
-    // the keyed map to 64-char keys.
+    // fast-check property: 500 pairs of distinct bearers; the first 8 hex
+    // characters of their digests differ. SHA-256 8-hex (32-bit)
+    // collisions are birthday-bound at ~65k bearers, so a healthy
+    // implementation will never collide on 500 pairs. The stronger
+    // invariant (no truncation anywhere in the key path) is enforced at
+    // the unit level by the 64-char regex above and by the digest
+    // determinism test; this test additionally exercises the keyspace
+    // distribution so a regression that subtly weakened the digest is
+    // visible in test failure cardinality.
     await fc.assert(
       fc.asyncProperty(
         fc.uniqueArray(
@@ -111,10 +112,13 @@ describe('sha256HexBearer: shape + determinism', () => {
         async ([a, b]) => {
           const ha = await sha256HexBearer(a!);
           const hb = await sha256HexBearer(b!);
+          // Full digest difference is the stronger assertion; the 8-char
+          // slice is the documented invariant for the in-isolate keyed map.
+          expect(ha).not.toBe(hb);
           expect(ha.slice(0, 8)).not.toBe(hb.slice(0, 8));
         },
       ),
-      { numRuns: 50 },
+      { numRuns: 500 },
     );
   });
 });
@@ -223,6 +227,31 @@ describe('POST /mcp content negotiation (integration, VRT-165)', () => {
     });
     expect(res.headers.get('Content-Type')).toBe('application/json');
     await res.text();
+  });
+
+  // Pins the spec contract that transport-level errors (bearer_invalid 401,
+  // tool_disabled 503, kill switch 503) stay non-envelope JSON regardless of
+  // Accept. Streaming a 503 inside an SSE envelope would confuse clients that
+  // retry on HTTP status, not on envelope content.
+  it('bearer_invalid 401 stays Content-Type application/json even when Accept: text/event-stream', async () => {
+    const res = await SELF.fetch('http://example.com/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'accept': 'text/event-stream',
+        Authorization: 'bearer vtk_lowercase_prefix',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'coordination-heat', arguments: { subject: 'NVDA' } },
+      }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('Content-Type')).toBe('application/json');
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe('INVALID_BEARER_FORMAT');
   });
 });
 

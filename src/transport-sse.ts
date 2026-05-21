@@ -34,6 +34,21 @@
 
 const TEXT_ENCODER = new TextEncoder();
 
+// Shared SSE response header block. Used by both respondSseEnvelope (the
+// one-shot Streamable HTTP response on POST /mcp) and openSseEndpointStream
+// (the persistent GET /sse stream). Keeping the header set in one constant
+// prevents the two surfaces drifting on CORS preflight headers; the prior
+// drift exposed an asymmetry where browser fetch-with-credentials calls
+// against /sse would fail despite the OPTIONS preflight advertising the
+// fuller header set.
+const SSE_RESPONSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache, no-transform',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+} as const;
+
 // Pinned constants. Unit tests assert these byte-for-byte so a future
 // refactor cannot silently change the keep-alive shape or interval.
 //
@@ -106,14 +121,8 @@ export function acceptHeaderRequestsSse(acceptHeader: string | null): boolean {
  * in-isolate keyed map and never emits it.
  */
 export async function sha256HexBearer(rawBearer: string): Promise<string> {
-  const bytes = TEXT_ENCODER.encode(rawBearer);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  const arr = new Uint8Array(digest);
-  let hex = '';
-  for (const b of arr) {
-    hex += b.toString(16).padStart(2, '0');
-  }
-  return hex;
+  const digest = await crypto.subtle.digest('SHA-256', TEXT_ENCODER.encode(rawBearer));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -132,16 +141,7 @@ export async function sha256HexBearer(rawBearer: string): Promise<string> {
  */
 export function respondSseEnvelope(envelope: unknown, status: number): Response {
   const body = `event: message\ndata: ${JSON.stringify(envelope)}\n\n`;
-  return new Response(body, {
-    status,
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'authorization, content-type',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    },
-  });
+  return new Response(body, { status, headers: SSE_RESPONSE_HEADERS });
 }
 
 /**
@@ -194,13 +194,23 @@ export function openSseEndpointStream(
   // Write the initial endpoint frame as fire-and-forget; the Response
   // returned below pipes through the same TransformStream so the client
   // sees the frame as soon as the writer flushes it. On write failure
-  // (already-closed reader, isolate eviction) clean up the map entry so
-  // a follow-up POST /sse falls through to the HTTP 202 fallback rather
-  // than relaying to a dead writer.
-  void writer.write(initialFrame).catch(() => {
+  // (already-closed reader, isolate eviction) abort the controller, clean
+  // up the map entry, and close the writer. The abort is load-bearing: the
+  // ctx.waitUntil promise below resolves only when the signal fires, so
+  // without the abort here a failed initial write would leave the
+  // waitUntil promise pending until isolate eviction.
+  void writer.write(initialFrame).catch((err: unknown) => {
+    console.log(
+      JSON.stringify({
+        event: 'sse_initial_frame_write_failed',
+        bearer_hash_present: true,
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
     if (openStreams.get(bearerHash)?.writer === writer) {
       openStreams.delete(bearerHash);
     }
+    abort.abort();
     void writer.close().catch(() => {
       // Already closed.
     });
@@ -237,14 +247,7 @@ export function openSseEndpointStream(
     }),
   );
 
-  return new Response(readable, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+  return new Response(readable, { status: 200, headers: SSE_RESPONSE_HEADERS });
 }
 
 /**
@@ -254,23 +257,39 @@ export function openSseEndpointStream(
  * HTTP 202 with the envelope in the response body, per the MCP
  * 2024-11-05 section 6.2.2 fallback).
  */
+// Three-valued outcome so callers can distinguish the cross-isolate
+// fallback ("no_stream", the documented 202-fallback trigger) from a
+// real anomaly ("relay_failed", an open stream errored mid-relay). The
+// caller in src/index.ts treats both as "respond inline", but the log
+// line lets operators filter on relay_failed to investigate stream
+// disconnects without conflating them with healthy cross-isolate
+// fallbacks.
+export type RelaySseOutcome = 'relayed' | 'no_stream' | 'relay_failed';
+
 export async function relaySsePostToStream(
   envelope: unknown,
   bearerHash: string,
-): Promise<boolean> {
+): Promise<RelaySseOutcome> {
   const entry = openStreams.get(bearerHash);
-  if (entry === undefined) return false;
+  if (entry === undefined) return 'no_stream';
 
   const frame = TEXT_ENCODER.encode(
     `event: message\ndata: ${JSON.stringify(envelope)}\n\n`,
   );
   try {
     await entry.writer.write(frame);
-    return true;
-  } catch {
+    return 'relayed';
+  } catch (err: unknown) {
+    console.log(
+      JSON.stringify({
+        event: 'sse_relay_write_failed',
+        bearer_hash_present: true,
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
     entry.abort.abort();
     openStreams.delete(bearerHash);
-    return false;
+    return 'relay_failed';
   }
 }
 
