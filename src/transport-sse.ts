@@ -288,7 +288,15 @@ export async function relaySsePostToStream(
       }),
     );
     entry.abort.abort();
-    openStreams.delete(bearerHash);
+    // Identity-guard the delete: while we were awaiting writer.write, a
+    // second GET /sse from the same bearer-hash may have replaced the
+    // map entry with a fresh writer. The failure we caught belongs to
+    // the OLD writer (this `entry`). Deleting the map slot
+    // unconditionally would orphan the replacement stream. The other
+    // two delete sites in openSseEndpointStream use the same guard.
+    if (openStreams.get(bearerHash)?.writer === entry.writer) {
+      openStreams.delete(bearerHash);
+    }
     return 'relay_failed';
   }
 }
