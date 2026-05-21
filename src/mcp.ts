@@ -51,7 +51,7 @@
 import { readBearer } from './auth';
 import { generateRequestId, type OutcomeKind } from './observability';
 import { proxyToolCall, type ProxyEnv, type ProxyOutcome } from './upstream';
-import { TOOLS } from './tools';
+import { TOOLS, type Tool } from './tools';
 
 export type McpEnv = ProxyEnv;
 
@@ -130,19 +130,34 @@ export function buildInitializeResult(): {
 // surfaces the agent-facing description and the JSON Schema for arguments;
 // requiresAuth is exposed as a non-spec hint that MCP-client UIs can use to
 // prompt for the bearer before issuing tools/call.
+//
+// outputSchema is optional per the MCP spec and per src/tools/index.ts:Tool.
+// VRT-160 added outputSchema to 3 tools (verity-score, verity-scan,
+// morning-brief); MCP clients calling tools/list must be able to see those
+// schemas. Earlier versions of this builder stripped outputSchema before
+// serializing, which kept VRT-160's documentation invisible on the wire.
+// The conditional spread keeps tools without outputSchema (currently 3 of 6)
+// emitting the same object shape they emit today.
 export function buildToolsListResult(): {
   tools: Array<{
     name: string;
     description: string;
     inputSchema: object;
+    outputSchema?: object;
     requiresAuth: boolean;
   }>;
 } {
+  // Widen the per-tool type to Tool here so the optional outputSchema field
+  // is reachable. TOOLS is `as const satisfies readonly Tool[]`, which keeps
+  // each element at its narrow literal type (and narrow literals do not have
+  // optional fields they did not declare).
+  const widened: ReadonlyArray<Tool> = TOOLS as ReadonlyArray<Tool>;
   return {
-    tools: TOOLS.map((t) => ({
+    tools: widened.map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
+      ...(t.outputSchema !== undefined ? { outputSchema: t.outputSchema } : {}),
       requiresAuth: t.requiresAuth,
     })),
   };

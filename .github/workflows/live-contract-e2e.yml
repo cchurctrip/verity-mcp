@@ -1,0 +1,53 @@
+# VRT-155 Step (c): scheduled live-contract e2e against mcp.verityskills.com.
+#
+# Runs tests/e2e/live-contract.test.ts on a daily cron + on workflow_dispatch.
+# Uses the repository secret VERITY_MCP_TEST_KEY for the live probe. Without
+# the secret the test suite skips cleanly (per its built-in env-var guard),
+# so a forked PR or a clone without the secret never breaks the gate.
+#
+# Security posture: this workflow uses only `secrets.VERITY_MCP_TEST_KEY`
+# (a repository secret, not untrusted input). The secret is passed via
+# `env:` rather than interpolated into `run:` strings, per the GitHub
+# Actions workflow-injection guide.
+#
+# Failure semantics: any contract drift between the live Worker and the
+# tests fails this workflow. The schedule is daily so a Wrangler deploy
+# that breaks the contract is caught within 24h (and immediately on a
+# manual workflow_dispatch from the owner post-deploy).
+
+name: live-contract-e2e
+
+on:
+  schedule:
+    # Daily at 08:00 UTC. Off-peak for North America; lines up with the
+    # main-repo synthetic-smoke window so multi-surface alerts cluster.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    # Manual trigger from the owner, typically post-Wrangler-deploy to
+    # confirm the live Worker still satisfies the contract.
+
+permissions:
+  contents: read
+
+jobs:
+  live-contract:
+    name: Live contract e2e (skips without secret)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run live-contract e2e
+        env:
+          VERITY_MCP_TEST_KEY: ${{ secrets.VERITY_MCP_TEST_KEY }}
+        run: npx vitest run tests/e2e/live-contract.test.ts --reporter=verbose
