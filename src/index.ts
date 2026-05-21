@@ -27,6 +27,15 @@ import {
 // in production.
 export interface Env extends McpEnv, ObservabilityEnv {
   MCP_KILL_SWITCH?: string;
+  /**
+   * Build-time stamped git SHA of the deployed Worker. Set by the deploy
+   * command via `wrangler deploy --var COMMIT_SHA:$(git rev-parse HEAD)`.
+   * Surfaces in /health so an operator (or the synthetic-smoke cron in the
+   * parent repo) can confirm which commit is live without grepping logs or
+   * re-running the live-contract probe. Falls back to 'unknown' when not
+   * set (local `wrangler dev`, or a deploy that skipped the --var injection).
+   */
+  COMMIT_SHA?: string;
 }
 
 // Cloudflare Workers production runtime returns 0 from Date.now() at module
