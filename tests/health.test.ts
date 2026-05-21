@@ -48,12 +48,16 @@ describe('OPTIONS preflight', () => {
   });
 });
 
-describe('GET /sse (stub)', () => {
-  it('returns 405 with JSON-RPC -32601 envelope', async () => {
+describe('GET /sse (legacy SSE bridge, VRT-165)', () => {
+  it('returns 401 INVALID_BEARER_FORMAT when no Authorization header is present', async () => {
+    // Pre-VRT-165 the /sse stub returned 405 with a -32601 envelope for any
+    // GET. Post-VRT-165 the route opens an EventSource-style stream for
+    // bearer-authed callers; an unauthenticated GET cannot meaningfully open
+    // a private stream and returns the standard bearer error.
     const res = await SELF.fetch('http://example.com/sse');
-    expect(res.status).toBe(405);
-    const body = (await res.json()) as { error?: { code?: number } };
-    expect(body.error?.code).toBe(-32601);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe('INVALID_BEARER_FORMAT');
   });
 });
 

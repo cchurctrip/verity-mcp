@@ -98,7 +98,7 @@ links:
 
 ## Known blockers to fix BEFORE submitting
 
-- [ ] SSE transport at `/sse` is currently a stub. Smithery's auto-test may or may not require SSE. If it does, listing will sit in "pending" until SSE lands. Safest: file the SSE follow-up issue first, link from `smithery.yaml`, then submit.
+- [x] Multi-client transport implemented (VRT-165). Both POST `/mcp` Streamable HTTP (Accept-gated SSE framing) and GET/POST `/sse` legacy bridge are live. Smithery's auto-test that probes either transport will pass.
 - [ ] Support email `support@verityskills.com` does not exist yet. Set up Cloudflare Email Routing → forward to your live inbox before going live.
 - [ ] Verity tier pages on verityskills.com/pricing must match the pricing block above (Retail $49, Pro $149, Fund $499). Verify before publishing.
 

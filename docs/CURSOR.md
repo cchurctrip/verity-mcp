@@ -66,6 +66,10 @@ Add to `~/.cursor/mcp.json`:
 
 Restart Cursor. Open settings -> MCP. Verity should appear with 6 tools listed. Test by typing `@verity-score NVDA` in chat.
 
+## Transports available
+
+Cursor connects via Streamable HTTP at `POST /mcp` (MCP 2025-03-26). The Worker also serves a legacy SSE bridge at `GET /sse` + `POST /sse` for clients that need EventSource handshake (Perplexity Comet today). Cursor does not need the legacy SSE path; the snippet above hits Streamable HTTP automatically. The server returns `Content-Type: application/json` for Cursor requests (Cursor's `mcp.json` direct-HTTP path does not send `text/event-stream` in Accept), and `Content-Type: text/event-stream` only when the client requests it.
+
 ## Cursor team awareness
 
 Cursor's Bugbot has already reviewed PRs in this repo (it found the iter-1 issues on PR #4). The Cursor team will recognize the project. After listing, ping `@anysphere` on X with the Angle 9 hook and tag `@cursor_ai`.

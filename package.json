@@ -6,13 +6,14 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --env production --var COMMIT_SHA:$(git rev-parse HEAD)",
+    "deploy": "wrangler deploy --env production --var COMMIT_SHA:$(git rev-parse HEAD) && bash scripts/multi-client-probe.sh https://mcp.verityskills.com",
     "deploy:preview": "wrangler deploy --env preview --var COMMIT_SHA:$(git rev-parse HEAD)",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check-manifest": "bash scripts/check-manifest-schema.sh"
+    "check-manifest": "bash scripts/check-manifest-schema.sh",
+    "probe": "bash scripts/multi-client-probe.sh https://mcp.verityskills.com"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.0",

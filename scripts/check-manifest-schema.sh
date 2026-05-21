@@ -12,6 +12,10 @@ if [ ! -f "$MANIFEST" ]; then
 fi
 
 # Required top-level keys (exact set; no additions, no renames).
+# VRT-165 added `transports` as a forward-looking informational field
+# describing the dual transport surface (Streamable HTTP + legacy SSE).
+# The pre-existing `transport: "http+sse"` string is retained as a legacy
+# alias for marketplace consumers that read the older single-field form.
 REQUIRED_KEYS=(
   "name"
   "version"
@@ -20,6 +24,7 @@ REQUIRED_KEYS=(
   "publisher_url"
   "server_url"
   "transport"
+  "transports"
   "mcp_spec_version"
   "auth"
   "tools"
@@ -49,6 +54,32 @@ fi
 TRANSPORT=$(jq -r '.transport' "$MANIFEST")
 if [ "$TRANSPORT" != "http+sse" ]; then
   echo "[manifest-schema] FAIL: transport must be 'http+sse', got '$TRANSPORT'"
+  exit 1
+fi
+
+# VRT-165: transports array describes the two real transport surfaces.
+# Exactly two entries: one streamable-http (POST /mcp) and one sse
+# (GET/POST /sse). Each entry has type and url. The streamable-http URL
+# must equal server_url for marketplace-consumer parity.
+if ! jq -e '.transports | type == "array" and length == 2' "$MANIFEST" >/dev/null; then
+  echo "[manifest-schema] FAIL: transports must be a 2-element array"
+  exit 1
+fi
+STREAMABLE_URL=$(jq -r '.transports[] | select(.type == "streamable-http") | .url' "$MANIFEST")
+SSE_URL=$(jq -r '.transports[] | select(.type == "sse") | .url' "$MANIFEST")
+if [ -z "$STREAMABLE_URL" ] || [ -z "$SSE_URL" ]; then
+  echo "[manifest-schema] FAIL: transports must contain one streamable-http entry and one sse entry"
+  exit 1
+fi
+SERVER_URL_FOR_TRANSPORTS=$(jq -r '.server_url' "$MANIFEST")
+if [ "$STREAMABLE_URL" != "$SERVER_URL_FOR_TRANSPORTS" ]; then
+  echo "[manifest-schema] FAIL: transports streamable-http url ($STREAMABLE_URL) must equal server_url ($SERVER_URL_FOR_TRANSPORTS)"
+  exit 1
+fi
+# Pin the sse url to the production /sse origin so a future edit cannot point
+# the legacy bridge at localhost or a non-verityskills domain.
+if [ "$SSE_URL" != "https://mcp.verityskills.com/sse" ]; then
+  echo "[manifest-schema] FAIL: transports sse url must be 'https://mcp.verityskills.com/sse', got '$SSE_URL'"
   exit 1
 fi
 

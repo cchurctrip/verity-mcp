@@ -17,7 +17,7 @@ This directory holds the per-registry submission packages for Verity's MCP serve
 5. [ ] `THREAT_MODEL.md` exists and lists the bearer-auth-proxy STRIDE entries (deferred to VRT-146b; required before public listing).
 6. [ ] Pricing page on `verityskills.com/pricing` is current (registries may auto-pull this).
 7. [ ] Docs page on `verityskills.com/skills` lists each tool with a one-paragraph natural-language usage example.
-8. [ ] SSE transport at `/sse` is implemented (currently a stub - Claude Desktop will not connect without it; Cursor + MCP Inspector + Cline already work via POST `/mcp`). If publishing before SSE lands, note in each listing that the current transport is HTTP+JSON-RPC and link to the SSE follow-up issue.
+8. [x] Multi-client transport implemented (VRT-165). POST `/mcp` content-negotiates: Streamable HTTP (SSE-framed) when `Accept: text/event-stream`, otherwise application/json (preserves the Cursor + synthetic-smoke contract). Legacy SSE bridge at GET `/sse` + POST `/sse` for clients that need EventSource handshake (Perplexity Comet today). `manifest.json` advertises both via a `transports` array root field; the legacy `transport: "http+sse"` single-string remains for marketplace consumers that read the older shape.
 
 ## Assets that go in every submission
 
