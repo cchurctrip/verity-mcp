@@ -30,6 +30,14 @@ transport: http+sse
 endpoint: https://mcp.verityskills.com/mcp
 mcp_spec_version: "2025-03-26"
 
+# Smithery currently consumes the single-field `transport` and `endpoint`
+# string keys above. The Worker also serves a legacy SSE bridge at
+# https://mcp.verityskills.com/sse (GET to open EventSource, POST to send
+# JSON-RPC) for clients that need the older handshake (Perplexity Comet
+# today). Most clients hit Streamable HTTP at the endpoint above and never
+# touch the legacy bridge. The full transports array lives in
+# verity-mcp/manifest.json at the repo root.
+
 categories:
   - finance
   - research

@@ -136,7 +136,7 @@ manipulation check.
 
 - Live at https://mcp.verityskills.com (Cloudflare Workers, Bundled plan).
 - /health endpoint: returns 200 + commit SHA + kill-switch state. Suitable for synthetic-smoke polling.
-- /mcp endpoint: POST + JSON-RPC 2.0. SSE transport is a stub today; HTTP transport is the production path. A SSE follow-up is filed at <issue link TODO>.
+- /mcp endpoint: POST + JSON-RPC 2.0 with Streamable HTTP content negotiation (Accept: text/event-stream returns one SSE-framed envelope per MCP 2025-03-26). /sse endpoint: GET opens EventSource stream with absolute-URL endpoint event + POST forwards JSON-RPC + relays response on same-isolate open stream (HTTP 202) or falls back to 200 + envelope inline (MCP 2024-11-05 6.2.2). Both transports live post VRT-165.
 - Auth: Authorization Bearer vtk_<token>. Bearer is translated to x-verity-key for the upstream skills routes (the parent verityskills.com API).
 - Kill switch: MCP_KILL_SWITCH Wrangler secret. When `on`, /mcp returns 503 with `KILL_SWITCH_ENGAGED`; /health stays reachable so operators can distinguish disabled-vs-crashed.
 
@@ -164,7 +164,7 @@ Verity is not financial advice. It surfaces social-media coordination signals, n
 - [x] tools/list returns the declared tool count.
 - [x] Auth flow documented for new users.
 - [x] Pricing page public.
-- [ ] SSE transport (deferred; HTTP works today).
+- [x] Multi-client transport (Streamable HTTP + legacy SSE bridge) live post VRT-165.
 - [ ] support@verityskills.com inbox configured (TODO before publishing).
 ```
 

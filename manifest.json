@@ -6,6 +6,10 @@
   "publisher_url": "https://verityskills.com",
   "server_url": "https://mcp.verityskills.com/mcp",
   "transport": "http+sse",
+  "transports": [
+    { "type": "streamable-http", "url": "https://mcp.verityskills.com/mcp" },
+    { "type": "sse", "url": "https://mcp.verityskills.com/sse" }
+  ],
   "mcp_spec_version": "2025-03-26",
   "auth": {
     "type": "bearer",

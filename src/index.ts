@@ -4,6 +4,25 @@
 // in a Response with permissive CORS headers and emits the structured log
 // line.
 //
+// VRT-165 multi-client transport:
+//   - POST /mcp content-negotiates on the Accept header. When Accept
+//     contains text/event-stream, the JSON-RPC response is wrapped as a
+//     single SSE `event: message` frame and the stream closes (Streamable
+//     HTTP, MCP 2025-03-26). Otherwise it stays Content-Type
+//     application/json (legacy Cursor + synthetic-smoke contract).
+//   - GET /sse opens an EventSource-style stream and emits an
+//     `event: endpoint` frame for the POST endpoint (legacy SSE, MCP
+//     2024-11-05).
+//   - POST /sse forwards the JSON-RPC envelope through handleMcpRequest
+//     and relays the response over the open GET /sse stream when both
+//     sides landed on the same isolate; falls back to HTTP 202 with the
+//     envelope in the body when they did not.
+//
+// Transport-level errors (bearer_invalid 401, tool_disabled 503, kill
+// switch 503) stay non-envelope JSON regardless of Accept. Streaming a
+// 503 would confuse clients that retry on HTTP status, not on envelope
+// content.
+//
 // The default export is wrapped with Sentry.withSentry so any uncaught
 // exception inside the fetch handler flows to Sentry with the
 // scrubAuthorization beforeSend hook applied. When SENTRY_DSN is unset
@@ -12,6 +31,7 @@
 
 import * as Sentry from '@sentry/cloudflare';
 
+import { readBearer } from './auth';
 import { handleMcpRequest, type McpEnv } from './mcp';
 import {
   buildLogLine,
@@ -19,6 +39,13 @@ import {
   logRequest,
   type ObservabilityEnv,
 } from './observability';
+import {
+  acceptHeaderRequestsSse,
+  openSseEndpointStream,
+  relaySsePostToStream,
+  respondSseEnvelope,
+  sha256HexBearer,
+} from './transport-sse';
 
 // Env is the union of every binding the Worker entry needs. Extending the
 // two sub-module env shapes makes the coupling load-bearing in the type
@@ -53,7 +80,7 @@ const CORS_HEADERS = {
 } as const;
 
 const handler = {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Lazy boot-time initialization. See comment near declaration: Date.now()
     // returns 0 at module scope in production but the real time inside a
     // request handler. Capturing on first request gives correct uptime math.
@@ -100,22 +127,62 @@ const handler = {
       );
     }
 
+    // Legacy SSE bridge for clients that need EventSource-style handshake
+    // (Perplexity Comet, MCP 2024-11-05). GET opens the stream; POST
+    // forwards a JSON-RPC envelope through the existing dispatch and
+    // relays the response over the open same-isolate stream. See
+    // src/transport-sse.ts for the framing contract and cross-isolate
+    // fallback policy (VRT-165).
     if (req.method === 'GET' && url.pathname === '/sse') {
-      // SSE stub. Full SSE transport deferred to a future PR.
-      // Preserves the manifest.json transport claim ('http+sse') for marketplace
-      // consumers; returns a structured JSON-RPC error so probing clients see a
-      // parseable response rather than a generic 404.
-      return jsonResponse(
-        {
-          jsonrpc: '2.0',
-          id: null,
-          error: {
-            code: -32601,
-            message: 'SSE transport not yet implemented; use POST /mcp',
+      const auth = readBearer(req);
+      if (auth.kind !== 'valid') {
+        return jsonResponse(
+          {
+            code: 'INVALID_BEARER_FORMAT',
+            error: "Authorization header must be 'Bearer vtk_<token>'",
           },
-        },
-        405,
+          401,
+        );
+      }
+      const bearerHash = await sha256HexBearer(auth.token);
+      return openSseEndpointStream(bearerHash, url, ctx);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/sse') {
+      const startedAt = Date.now();
+      const result = await handleMcpRequest(req, env);
+      logRequest(
+        buildLogLine({
+          request_id: result.requestId,
+          outcome_kind: result.outcomeKind,
+          tool: result.tool,
+          upstream_status: result.upstreamStatus,
+          latency_ms: Date.now() - startedAt,
+          auth_present: req.headers.get('authorization') !== null,
+          ...(result.errorDetail !== null ? { error: result.errorDetail } : {}),
+        }),
       );
+
+      // Try to relay the response over the open GET /sse stream for this
+      // bearer when both sides landed on the same isolate. On success the
+      // client receives the envelope as an SSE `event: message` on the GET
+      // stream and the POST replies HTTP 202 with no body. Transport-level
+      // errors (status !== 200) and bearer-absent/invalid cases skip the
+      // relay and respond with the envelope inline so the client sees the
+      // right HTTP status on its retry layer.
+      if (result.status === 200) {
+        const auth = readBearer(req);
+        if (auth.kind === 'valid') {
+          const bearerHash = await sha256HexBearer(auth.token);
+          const relayed = await relaySsePostToStream(result.body, bearerHash);
+          if (relayed) {
+            return new Response(null, { status: 202, headers: CORS_HEADERS });
+          }
+        }
+      }
+
+      // MCP 2024-11-05 section 6.2.2 fallback.
+      return jsonResponse(result.body, result.status);
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
@@ -142,6 +209,19 @@ const handler = {
         }),
       );
 
+      // Streamable HTTP content negotiation (VRT-165). When the Accept
+      // header lists text/event-stream AND the dispatch returned a 200
+      // (i.e., not a transport-level error), wrap the envelope in a single
+      // SSE `event: message` frame and close the stream. Otherwise respond
+      // with Content-Type application/json (existing contract for Cursor +
+      // synthetic-smoke). Transport-level errors stay non-envelope JSON
+      // regardless of Accept.
+      const wantsSse =
+        result.status === 200 &&
+        acceptHeaderRequestsSse(req.headers.get('accept'));
+      if (wantsSse) {
+        return respondSseEnvelope(result.body, result.status);
+      }
       return jsonResponse(result.body, result.status);
     }
 

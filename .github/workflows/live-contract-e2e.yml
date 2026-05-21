@@ -47,7 +47,7 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Run live-contract e2e
+      - name: Run live-contract + multi-client e2e
         env:
           VERITY_MCP_TEST_KEY: ${{ secrets.VERITY_MCP_TEST_KEY }}
-        run: npx vitest run tests/e2e/live-contract.test.ts --reporter=verbose
+        run: npx vitest run --project e2e --reporter=verbose

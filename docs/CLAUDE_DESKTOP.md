@@ -28,6 +28,15 @@ Where to get `vtk_<your-token>`: https://verityskills.com/account/api-keys
 
 Restart Claude Desktop. Open a new conversation. Type `/verity` to confirm the 6 tools are loaded, or just ask "Use verity-score on NVDA" and Claude will invoke the tool.
 
+## Transports available
+
+Two transports advertised at `https://mcp.verityskills.com`:
+
+- **Streamable HTTP** at `POST /mcp`. When the request sends `Accept: text/event-stream`, the response is framed as one Server-Sent Events `event: message` followed by stream close (per MCP 2025-03-26). When the request omits `text/event-stream` from Accept, the response stays `Content-Type: application/json`. Use this transport for direct connections from Claude Desktop's future native MCP support, ChatGPT Desktop, Gemini, and Cursor.
+- **Legacy SSE** at `GET /sse` (open EventSource) + `POST /sse` (send JSON-RPC). Use this transport for clients that connect via EventSource handshake (Perplexity Comet today).
+
+Either transport reaches the same six tools. The npx server-fetch proxy snippet above goes through Streamable HTTP automatically.
+
 ## One-click install (when available)
 
 Anthropic does not yet support `claude://mcp/install` deep links. When they do, embed this on `/skills`:
