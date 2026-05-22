@@ -213,20 +213,50 @@ describe('buildToolsListResult', () => {
 describe('outcomeToResponse', () => {
   const id = 7;
 
-  it('forward wraps body in JSON-RPC result and preserves upstream status', () => {
+  it('forward wraps upstream 2xx body in MCP content envelope, no isError', () => {
     const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: { ok: true }, upstreamStatus: 200 };
     expect(outcomeToResponse(outcome, id)).toEqual({
-      body: { jsonrpc: '2.0', id, result: { ok: true } },
+      body: {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+        },
+      },
       status: 200,
     });
   });
 
-  it('forward preserves 402 status when upstream returned 402 (post-upgrade_url rewrite)', () => {
+  it('forward preserves 402 status AND sets isError: true on non-2xx upstream forwards', () => {
     const body = { code: 'TRIAL_CAP_REACHED', upgrade_url: 'https://verityskills.com/upgrade?return_to=mcp&via=cap' };
     const outcome: ProxyOutcome = { kind: 'forward', status: 402, body, upstreamStatus: 402 };
     const r = outcomeToResponse(outcome, id);
     expect(r.status).toBe(402);
-    expect(r.body).toEqual({ jsonrpc: '2.0', id, result: body });
+    expect(r.body).toEqual({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify(body) }],
+        isError: true,
+      },
+    });
+  });
+
+  // MCP tools/call response contract pin (regression guard for the Claude
+  // Desktop "malformed response (missing content field)" failure mode):
+  // every successful forward must yield a result.content[] array with a
+  // single text block whose text parses back to the upstream body. The
+  // pre-VRT-165 shape (`result: <upstream body>` unwrapped) shipped briefly
+  // and broke every spec-conforming MCP client.
+  it('forward result.content[0] is type=text and text parses back to the upstream body', () => {
+    const upstream = { ticker: 'NVDA', score: 75, breakdown: { coordination: 0.4 } };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: upstream, upstreamStatus: 200 };
+    const r = outcomeToResponse(outcome, id);
+    const env = r.body as { result: { content: ReadonlyArray<{ type: string; text: string }>; isError?: boolean } };
+    expect(env.result.content).toHaveLength(1);
+    expect(env.result.content[0]!.type).toBe('text');
+    expect(JSON.parse(env.result.content[0]!.text)).toEqual(upstream);
+    expect(env.result.isError).toBeUndefined();
   });
 
   it('bearer_invalid returns HTTP 401 with INVALID_BEARER_FORMAT body (non JSON-RPC envelope)', () => {
@@ -397,7 +427,13 @@ describe('handleMcpRequest', () => {
     const r = await handleMcpRequest(req, env, fetchImpl);
 
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ jsonrpc: '2.0', id: 9, result: { score: 87 } });
+    expect(r.body).toEqual({
+      jsonrpc: '2.0',
+      id: 9,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify({ score: 87 }) }],
+      },
+    });
 
     // Bearer translated to x-verity-key with NO Bearer prefix (coupling #8).
     expect(capturedHeaders.get('x-verity-key')).toBe('vtk_abc123');
@@ -425,7 +461,14 @@ describe('handleMcpRequest', () => {
     });
     const r = await handleMcpRequest(req, env, fetchImpl);
     expect(r.status).toBe(401);
-    expect(r.body).toEqual({ jsonrpc: '2.0', id: 1, result: { code: 'UNAUTHORIZED' } });
+    expect(r.body).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify({ code: 'UNAUTHORIZED' }) }],
+        isError: true,
+      },
+    });
   });
 
   it('tools/call with malformed bearer returns HTTP 401 INVALID_BEARER_FORMAT and never hits upstream', async () => {
@@ -666,7 +709,14 @@ describe('handleMcpRequest', () => {
     );
     const r = await handleMcpRequest(req, env, fetchImpl);
     expect(r.status).toBe(403);
-    expect(r.body).toEqual({ jsonrpc: '2.0', id: 1, result: { code: 'TIER_NOT_PERMITTED' } });
+    expect(r.body).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify({ code: 'TIER_NOT_PERMITTED' }) }],
+        isError: true,
+      },
+    });
     expect(r.outcomeKind).toBe('forward');
     expect(r.upstreamStatus).toBe(403);
   });
