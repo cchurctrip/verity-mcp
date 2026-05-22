@@ -14,27 +14,23 @@ Every skill needs a Verity API key. Issue one in seconds at https://verityskills
 
 ### Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows). Native HTTP transport (Claude Desktop 2026 builds):
 
 ```json
 {
   "mcpServers": {
     "verity": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-fetch",
-        "https://mcp.verityskills.com/mcp"
-      ],
-      "env": {
-        "AUTHORIZATION": "Bearer vtk_<your-token>"
+      "type": "http",
+      "url": "https://mcp.verityskills.com/mcp",
+      "headers": {
+        "Authorization": "Bearer vtk_<your-token>"
       }
     }
   }
 }
 ```
 
-Restart Claude. See `docs/CLAUDE_DESKTOP.md` for the full guide.
+If your Claude Desktop is older and rejects `type: "http"`, use the `mcp-remote` stdio bridge. See `docs/CLAUDE_DESKTOP.md` for the full guide. Fully quit Claude Desktop (Cmd-Q on macOS) before relaunch.
 
 ### Cursor
 

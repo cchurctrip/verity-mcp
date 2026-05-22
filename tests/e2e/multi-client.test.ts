@@ -5,7 +5,7 @@
 //
 //   - Cursor: 3 Accept-header variants must route to application/json
 //     (no Accept, *\/*, application/json alone).
-//   - Claude Desktop (npx server-fetch proxy default Accept *\/*): one
+//   - Claude Desktop (native HTTP transport, default Accept *\/*): one
 //     probe routes to application/json.
 //   - ChatGPT Desktop Streamable HTTP: 2 Accept-header variants, both
 //     route to text/event-stream framed as one event: message + close.
@@ -111,8 +111,8 @@ liveDescribe('multi-client probes against mcp.verityskills.com (VRT-165)', () =>
     });
   });
 
-  describe('Claude Desktop (npx server-fetch proxy default Accept)', () => {
-    it('Accept: */* (proxy default) routes to application/json', async () => {
+  describe('Claude Desktop (native HTTP transport default Accept)', () => {
+    it('Accept: */* (default) routes to application/json', async () => {
       const res = await postMcp('*/*', initEnvelope(4), TEST_KEY!);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toMatch(/^application\/json/);

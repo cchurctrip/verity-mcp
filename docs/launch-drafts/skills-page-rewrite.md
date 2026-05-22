@@ -73,9 +73,9 @@ Three tabs:
 {
   "mcpServers": {
     "verity": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch", "https://mcp.verityskills.com/mcp"],
-      "env": { "AUTHORIZATION": "Bearer vtk_<your-token>" }
+      "type": "http",
+      "url": "https://mcp.verityskills.com/mcp",
+      "headers": { "Authorization": "Bearer vtk_<your-token>" }
     }
   }
 }
