@@ -171,13 +171,36 @@ export interface McpResponse {
 // outcomeToResponse maps each ProxyOutcome to its HTTP-status + body. Kept
 // separate from handleMcpRequest so the mapping logic can be unit-tested
 // without spinning up a fake Request.
+//
+// MCP tools/call response contract: result MUST include a `content` array
+// of content blocks. The verityskills.com skill routes return their raw
+// domain payload as JSON (ticker/score/explanation/...); we wrap that
+// payload in MCP's content envelope so spec-conforming MCP clients (Claude
+// Desktop, ChatGPT Desktop, Comet, Gemini) can render the result. Without
+// the wrap, Claude Desktop 1.8500+ surfaces "MCP server returned a
+// malformed response (missing content field)" on every tool call. The
+// 9/9 transport probes in scripts/multi-client-probe.sh only validated
+// framing; this is the inner MCP content-shape contract.
+//
+// For upstream non-2xx forwards (401/402/403) set isError: true so MCP
+// clients render the failure to the user rather than treat the error
+// body as a successful tool result.
 export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResponse {
   switch (outcome.kind) {
-    case 'forward':
+    case 'forward': {
+      const isError = outcome.status < 200 || outcome.status >= 300;
       return {
-        body: { jsonrpc: '2.0', id, result: outcome.body },
+        body: {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            content: [{ type: 'text', text: JSON.stringify(outcome.body) }],
+            ...(isError ? { isError: true } : {}),
+          },
+        },
         status: outcome.status,
       };
+    }
     case 'bearer_invalid':
       return {
         body: {

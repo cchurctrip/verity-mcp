@@ -57,6 +57,36 @@ async function callMcp(body: unknown, headers: Record<string, string> = {}): Pro
   });
 }
 
+// MCP tools/call response shape per MCP 2025-03-26:
+//   { jsonrpc, id, result: { content: [{type:'text', text:'<JSON>'}], isError? } }
+// The upstream skill route's payload is JSON-stringified into content[0].text.
+// Tests assert against the parsed upstream payload, so they need to unwrap.
+// initialize and tools/list keep their MCP-defined shapes; this helper is
+// tools/call-only.
+interface ToolCallEnvelope {
+  jsonrpc: string;
+  id: number;
+  result: {
+    content: ReadonlyArray<{ type: string; text: string }>;
+    isError?: boolean;
+  };
+}
+
+function unwrapToolsCall(body: unknown): { upstream: Record<string, unknown>; isError: boolean } {
+  const env = body as ToolCallEnvelope;
+  if (!Array.isArray(env.result?.content) || env.result.content.length === 0) {
+    throw new Error('tools/call response missing result.content[]');
+  }
+  const first = env.result.content[0]!;
+  if (first.type !== 'text' || typeof first.text !== 'string') {
+    throw new Error('tools/call content[0] is not a text block');
+  }
+  return {
+    upstream: JSON.parse(first.text) as Record<string, unknown>,
+    isError: env.result.isError === true,
+  };
+}
+
 describe('tools/call: happy path for each of the 6 tools', () => {
   // upstreamBody is typed as Record<string, unknown> (not unknown) because
   // fetchMock.reply expects object | string | Buffer for its body parameter.
@@ -85,7 +115,10 @@ describe('tools/call: happy path for each of the 6 tools', () => {
       tc.auth ? { authorization: tc.auth } : {},
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: 9, result: tc.upstreamBody });
+    const body = await res.json();
+    const { upstream, isError } = unwrapToolsCall(body);
+    expect(upstream).toEqual(tc.upstreamBody);
+    expect(isError).toBe(false);
   });
 });
 
@@ -105,8 +138,10 @@ describe('tools/call: 401 upstream verbatim forward', () => {
       params: { name: 'verity-score', arguments: { subject: 'X' } },
     });
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { jsonrpc: string; id: number; result: { code: string } };
-    expect(body.result.code).toBe('UNAUTHORIZED');
+    const body = await res.json();
+    const { upstream, isError } = unwrapToolsCall(body);
+    expect(upstream['code']).toBe('UNAUTHORIZED');
+    expect(isError).toBe(true);
   });
 });
 
@@ -126,11 +161,13 @@ describe('tools/call: 402 dual-shape upgrade_url injection', () => {
       { authorization: 'Bearer vtk_a' },
     );
     expect(res.status).toBe(402);
-    const body = (await res.json()) as { result: { code: string; upgrade_url: string; calls_used: number; calls_remaining: number } };
-    expect(body.result.upgrade_url).toBe('https://verityskills.com/upgrade?return_to=mcp&via=cap');
-    expect(body.result.calls_used).toBe(5);
-    expect(body.result.calls_remaining).toBe(0);
-    expect(body.result.code).toBe('TRIAL_CAP_REACHED');
+    const body = await res.json();
+    const { upstream, isError } = unwrapToolsCall(body);
+    expect(upstream['upgrade_url']).toBe('https://verityskills.com/upgrade?return_to=mcp&via=cap');
+    expect(upstream['calls_used']).toBe(5);
+    expect(upstream['calls_remaining']).toBe(0);
+    expect(upstream['code']).toBe('TRIAL_CAP_REACHED');
+    expect(isError).toBe(true);
   });
 
   it('secondary-gate body without upgrade_url injects absolute upgrade_url and preserves cap/used', async () => {
@@ -148,10 +185,12 @@ describe('tools/call: 402 dual-shape upgrade_url injection', () => {
       { authorization: 'Bearer vtk_a' },
     );
     expect(res.status).toBe(402);
-    const body = (await res.json()) as { result: { code: string; cap: number; used: number; upgrade_url: string } };
-    expect(body.result.upgrade_url).toBe('https://verityskills.com/upgrade?return_to=mcp&via=cap');
-    expect(body.result.cap).toBe(10);
-    expect(body.result.used).toBe(10);
+    const body = await res.json();
+    const { upstream, isError } = unwrapToolsCall(body);
+    expect(upstream['upgrade_url']).toBe('https://verityskills.com/upgrade?return_to=mcp&via=cap');
+    expect(upstream['cap']).toBe(10);
+    expect(upstream['used']).toBe(10);
+    expect(isError).toBe(true);
   });
 });
 
@@ -167,8 +206,10 @@ describe('tools/call: 403 verbatim forward', () => {
       { authorization: 'Bearer vtk_a' },
     );
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { result: { code: string } };
-    expect(body.result.code).toBe('TIER_NOT_PERMITTED');
+    const body = await res.json();
+    const { upstream, isError } = unwrapToolsCall(body);
+    expect(upstream['code']).toBe('TIER_NOT_PERMITTED');
+    expect(isError).toBe(true);
   });
 });
 
