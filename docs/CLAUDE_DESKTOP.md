@@ -2,9 +2,29 @@
 
 Claude Desktop reads MCP server configs from `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows).
 
-## Direct config snippet
+## Direct config snippet (native HTTP, Claude Desktop 2026 builds)
 
 Paste into the JSON file's `mcpServers` block (create the object if it doesn't exist):
+
+```json
+{
+  "mcpServers": {
+    "verity": {
+      "type": "http",
+      "url": "https://mcp.verityskills.com/mcp",
+      "headers": {
+        "Authorization": "Bearer vtk_<your-token>"
+      }
+    }
+  }
+}
+```
+
+Claude Desktop 2026 builds support `type: "http"` for direct Streamable HTTP MCP server connections, no proxy needed.
+
+## Fallback for older Claude Desktop builds (mcp-remote stdio bridge)
+
+If `type: "http"` is rejected (older Claude Desktop, or a "no tools available" response after restart), use the `mcp-remote` stdio bridge to translate stdio MCP into HTTP MCP:
 
 ```json
 {
@@ -13,29 +33,34 @@ Paste into the JSON file's `mcpServers` block (create the object if it doesn't e
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-fetch",
-        "https://mcp.verityskills.com/mcp"
-      ],
-      "env": {
-        "AUTHORIZATION": "Bearer vtk_<your-token>"
-      }
+        "mcp-remote",
+        "https://mcp.verityskills.com/mcp",
+        "--header",
+        "Authorization:Bearer vtk_<your-token>"
+      ]
     }
   }
 }
 ```
 
+`mcp-remote` (from npm, package `mcp-remote`) is the standard stdio-to-HTTP bridge for MCP servers. The `--header` flag uses `Header:value` with no space after the colon to dodge yargs parsing.
+
+Do NOT use `@modelcontextprotocol/server-fetch` here. That package provides a `fetch` tool (callable from inside any MCP client); it is not a bridge to a remote MCP server. Prior versions of this doc had the wrong snippet.
+
+## Verifying the install
+
 Where to get `vtk_<your-token>`: https://verityskills.com/account/api-keys
 
-Restart Claude Desktop. Open a new conversation. Type `/verity` to confirm the 6 tools are loaded, or just ask "Use verity-score on NVDA" and Claude will invoke the tool.
+Fully quit Claude Desktop (Cmd-Q on macOS, right-click tray icon then Quit on Windows) before relaunch. Open a new conversation. Type `/verity` to confirm the six tools are loaded, or just ask "Use verity-score on NVDA" and Claude will invoke the tool.
 
 ## Transports available
 
 Two transports advertised at `https://mcp.verityskills.com`:
 
-- **Streamable HTTP** at `POST /mcp`. When the request sends `Accept: text/event-stream`, the response is framed as one Server-Sent Events `event: message` followed by stream close (per MCP 2025-03-26). When the request omits `text/event-stream` from Accept, the response stays `Content-Type: application/json`. Use this transport for direct connections from Claude Desktop's future native MCP support, ChatGPT Desktop, Gemini, and Cursor.
+- **Streamable HTTP** at `POST /mcp`. When the request sends `Accept: text/event-stream`, the response is framed as one Server-Sent Events `event: message` followed by stream close (per MCP 2025-03-26). When the request omits `text/event-stream` from Accept, the response stays `Content-Type: application/json`. Use this transport for direct connections from Claude Desktop (2026+ native HTTP transport), ChatGPT Desktop, Gemini, and Cursor.
 - **Legacy SSE** at `GET /sse` (open EventSource) + `POST /sse` (send JSON-RPC). Use this transport for clients that connect via EventSource handshake (Perplexity Comet today).
 
-Either transport reaches the same six tools. The npx server-fetch proxy snippet above goes through Streamable HTTP automatically.
+Either transport reaches the same six tools. Native HTTP transport in Claude Desktop uses Streamable HTTP automatically. The `mcp-remote` bridge falls back to whatever the upstream advertises; it typically picks Streamable HTTP.
 
 ## One-click install (when available)
 

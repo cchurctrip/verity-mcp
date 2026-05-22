@@ -162,23 +162,23 @@ Wait 5-10 minutes after flipping the flag and check Vercel cron logs or Sentry f
 
 The Worker is live. Now confirm a real agent can use it.
 
-**Claude Desktop:** edit `~/Library/Application Support/Claude/claude_desktop_config.json` (or paste from `docs/CURSOR.md` / `docs/CLAUDE_DESKTOP.md`):
+**Claude Desktop:** edit `~/Library/Application Support/Claude/claude_desktop_config.json` (or paste from `docs/CLAUDE_DESKTOP.md`):
 
 ```json
 {
   "mcpServers": {
     "verity": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch", "https://mcp.verityskills.com/mcp"],
-      "env": {
-        "AUTHORIZATION": "Bearer vtk_<your-token>"
+      "type": "http",
+      "url": "https://mcp.verityskills.com/mcp",
+      "headers": {
+        "Authorization": "Bearer vtk_<your-token>"
       }
     }
   }
 }
 ```
 
-Restart Claude Desktop. Open a new conversation, ask: "Use the verity-score tool to check NVDA." Claude should invoke `tools/call` against the Worker.
+Fully quit Claude Desktop (Cmd-Q), relaunch. Open a new conversation, ask: "Use the verity-score tool to check NVDA." Claude should invoke `tools/call` against the Worker. If your Claude Desktop build is older and rejects `type: "http"`, fall back to the `mcp-remote` stdio bridge per `docs/CLAUDE_DESKTOP.md`.
 
 **Cursor:** Settings -> MCP -> Add Server. URL: `https://mcp.verityskills.com/mcp`. Auth: bearer.
 
