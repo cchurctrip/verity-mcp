@@ -32,7 +32,13 @@
 import * as Sentry from '@sentry/cloudflare';
 
 import { readBearer } from './auth';
-import { handleMcpRequest, type McpEnv } from './mcp';
+import { handleMcpRequest, WWW_AUTHENTICATE_VALUE, type McpEnv } from './mcp';
+import {
+  buildAuthorizationServerMetadata,
+  buildProtectedResourceMetadata,
+  type OauthDiscoveryEnv,
+} from './oauth-discovery';
+import { handleOauthToken, type OauthTokenEnv } from './oauth-token';
 import {
   buildLogLine,
   buildSentryConfig,
@@ -52,7 +58,7 @@ import {
 // system: adding a required key to McpEnv or ObservabilityEnv becomes a
 // compile error here rather than silently working until the first request
 // in production.
-export interface Env extends McpEnv, ObservabilityEnv {
+export interface Env extends McpEnv, ObservabilityEnv, OauthDiscoveryEnv, OauthTokenEnv {
   MCP_KILL_SWITCH?: string;
   /**
    * Build-time stamped git SHA of the deployed Worker. Set by the deploy
@@ -127,6 +133,30 @@ const handler = {
       );
     }
 
+    // VRT-166 OAuth 2.1 surface. Three new routes.
+    //
+    // Discovery endpoints (RFC 8414 + RFC 9728) are public, unauthenticated,
+    // and gated only by the global MCP_KILL_SWITCH (already returned above)
+    // and the OAuth-specific MCP_OAUTH_KILL_SWITCH (handled inside the
+    // builders, which omit OAuth-specific fields so DCR-attempting clients
+    // fail-fast and fall through to the bearer path).
+    if (req.method === 'GET' && url.pathname === '/.well-known/oauth-authorization-server') {
+      return jsonResponse(buildAuthorizationServerMetadata(env), 200);
+    }
+    if (req.method === 'GET' && url.pathname === '/.well-known/oauth-protected-resource') {
+      return jsonResponse(buildProtectedResourceMetadata(env), 200);
+    }
+
+    // /oauth/token (RFC 6749). authorization_code + refresh_token grants
+    // with PKCE S256 + RFC 8707 resource indicator + audience binding.
+    // Kill-switch returns 503 with Retry-After; misconfigured (no Supabase
+    // secret) returns 503 with the oauth_misconfigured sentinel so operators
+    // can see the misconfiguration in the smoke cron.
+    if (req.method === 'POST' && url.pathname === '/oauth/token') {
+      const tokenResult = await handleOauthToken(req, env);
+      return jsonResponse(tokenResult.body, tokenResult.status, tokenResult.headers);
+    }
+
     // Legacy SSE bridge for clients that need EventSource-style handshake
     // (Perplexity Comet, MCP 2024-11-05). GET opens the stream; POST
     // forwards a JSON-RPC envelope through the existing dispatch and
@@ -135,6 +165,12 @@ const handler = {
     // fallback policy (VRT-165).
     if (req.method === 'GET' && url.pathname === '/sse') {
       const auth = readBearer(req);
+      // /sse currently supports only the vtk_* user-API-key path. OAuth-token
+      // (vto_) callers are explicitly rejected here because the legacy SSE
+      // bridge stores the bearer-hash without round-tripping through the
+      // OAuth validation layer; a future story can extend the bridge for
+      // OAuth tokens but for Phase 1 the vto_ path uses Streamable HTTP on
+      // POST /mcp only.
       if (auth.kind !== 'valid') {
         return jsonResponse(
           {
@@ -142,6 +178,7 @@ const handler = {
             error: "Authorization header must be 'Bearer vtk_<token>'",
           },
           401,
+          { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE },
         );
       }
       const bearerHash = await sha256HexBearer(auth.token);
@@ -188,7 +225,7 @@ const handler = {
       }
 
       // MCP 2024-11-05 section 6.2.2 fallback.
-      return jsonResponse(result.body, result.status);
+      return jsonResponse(result.body, result.status, result.headers);
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
@@ -228,7 +265,7 @@ const handler = {
       if (wantsSse) {
         return respondSseEnvelope(result.body, result.status);
       }
-      return jsonResponse(result.body, result.status);
+      return jsonResponse(result.body, result.status, result.headers);
     }
 
     if (req.method === 'GET' && url.pathname === '/') {
@@ -264,9 +301,17 @@ const handler = {
 // CloudflareOptions | undefined` shape (Env extends ObservabilityEnv).
 export default Sentry.withSentry<Env>(buildSentryConfig, handler);
 
-function jsonResponse(body: unknown, status: number): Response {
+function jsonResponse(
+  body: unknown,
+  status: number,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    headers: {
+      ...CORS_HEADERS,
+      'Content-Type': 'application/json',
+      ...(extraHeaders ?? {}),
+    },
   });
 }
