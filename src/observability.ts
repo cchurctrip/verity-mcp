@@ -195,14 +195,26 @@ export function scrubAuthorization(
 }
 
 // VRT-166 Phase 1 extension (per arch review STRIDE Info-disclosure row 2):
-// also strip OAuth-related body keys (code, refresh_token, access_token,
-// code_verifier, client_secret) whose values would otherwise carry the raw
-// authorization-code / token / PKCE-verifier into Sentry breadcrumbs if any
+// also strip unambiguously OAuth-credential body keys (refresh_token,
+// access_token, code_verifier, client_secret) whose values would otherwise
+// carry the raw token / PKCE-verifier into Sentry breadcrumbs if any
 // future handler ever passed the parsed body to captureException.
+//
+// The OAuth `code` parameter is NOT in this set. While `code` would carry
+// the raw authorization-code value in a Sentry breadcrumb, a global
+// redaction of every field named `code` would also blank unrelated fields
+// (HTTP status code, error code, country code, etc.) across non-OAuth
+// breadcrumbs. The narrower defenses cover the realistic leak vectors:
+// (a) the OAuth handler never passes the parsed body to Sentry directly,
+// (b) the value-pattern scrub below catches vto_* in any string field,
+// (c) authorization codes never reach the resource-server path (they are
+// only sent to /oauth/token and consumed once). Documented under arch
+// review RISK 7 polish: a future iteration can add a path-aware scrubber
+// that strips `code` only when the parent breadcrumb context is the
+// /oauth/token request body.
 const REDACTED_HEADER_NAMES = new Set([
   'authorization',
   'x-verity-key',
-  'code',
   'refresh_token',
   'access_token',
   'code_verifier',

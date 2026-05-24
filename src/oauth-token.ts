@@ -42,7 +42,7 @@ import {
   type SupabaseEnv,
 } from './supabase';
 import {
-  deleteRefreshToken,
+  claimRefreshTokenForRotation,
   findCodeByHash,
   findRefreshTokenByHash,
   insertAccessToken,
@@ -406,43 +406,39 @@ async function handleRefreshTokenGrant(
     return errorResponse('invalid_target', 'stored refresh aud_uri is not canonical', 400);
   }
 
-  // Rotation order: mint the fresh pair FIRST, then hard-delete the
-  // presented refresh row. If minting fails (DB partial insert, network
-  // error mid-flight), the client retries against the old refresh and
-  // succeeds; we have not yet consumed it. Without this ordering, a mid-
-  // mint failure would leave the installation without a usable refresh
-  // until re-authorization (Bugbot finding #4 on PR #17).
+  // Atomic claim-and-delete: the DELETE filters on revoked_at=is.null at
+  // the SQL layer, so two concurrent refresh-token grants presenting the
+  // same token can only have ONE see a 1-row delete. The loser sees 0
+  // rows and returns invalid_grant; only one pair gets minted per claim.
+  // This is the refresh-side analog of markCodeUsedIfUnused; without it,
+  // both isolates would mint a pair against one refresh row (Bugbot
+  // iter-3 finding "Refresh grant allows concurrent double mint").
   //
-  // The trade-off: if the response is lost in transit AFTER mint+delete,
-  // the client retries against the old (now-deleted) refresh and hits the
-  // family-revocation path. This is RFC 6819 §5.2.2.3's documented
-  // behavior; arch review RISK 6 ("Refresh-token rotation under network
-  // failure") flags it as <1% false-positive boot rate, acceptable for v1.
-  const mintResult = await mintTokenPair(db, {
+  // Trade-off vs. the prior mint-then-delete ordering: if mint fails
+  // AFTER the claim succeeds, the refresh is consumed and the client
+  // hits the family-revoke path on retry. RFC 6819 §5.2.2.3 documents
+  // the rare false-positive boot rate; arch review RISK 6 calls it
+  // <1% acceptable for v1. The atomic-claim approach is preferred
+  // because the concurrent-double-mint class is a stronger attack
+  // (single leaked token issues N pairs across N concurrent requests)
+  // than the network-drop class (single false-positive boot per drop).
+  const claim = await claimRefreshTokenForRotation(db, refreshHash);
+  if (claim.kind !== 'ok') {
+    return errorResponse('server_error', `refresh claim failed: ${describe(claim)}`, 500);
+  }
+  if (claim.rows.length === 0) {
+    // Race loser, OR the row was revoked between our SELECT and our
+    // DELETE. Either way, the legitimate path mints once; we abort.
+    return errorResponse('invalid_grant', 'refresh token already consumed or revoked', 400);
+  }
+
+  return mintTokenPair(db, {
     clientId: row.client_id,
     userId: row.user_id,
     scope: row.scope,
     audUri: row.aud_uri,
     installationId: row.installation_id,
   });
-  if (mintResult.status !== 200) {
-    // Mint failed; the refresh row is intact, client can retry safely.
-    return mintResult;
-  }
-
-  const del = await deleteRefreshToken(db, refreshHash);
-  if (del.kind !== 'ok' || del.rows.length === 0) {
-    // Mint succeeded but the redeemed refresh row was not deleted. The
-    // legitimate client has a fresh pair; if it later retries against the
-    // OLD refresh (network drop scenario), the family-revocation path will
-    // burn both pairs. Log this case loudly via the server_error response
-    // so on-call can correlate to the refresh-token-grant duplicate-mint
-    // class. We do NOT roll back the mint: the new pair is live and
-    // returning a 500 here would mask the successful issuance.
-    return mintResult;
-  }
-
-  return mintResult;
 }
 
 /**

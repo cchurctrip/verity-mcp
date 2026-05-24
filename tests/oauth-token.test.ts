@@ -467,12 +467,12 @@ describe('handleOauthToken refresh_token grant', () => {
     const { fetchImpl, calls } = makeFetchStub([
       // 1. SELECT refresh row
       { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?select=', status: 200, body: [refreshRow] },
-      // 2. INSERT access token (mint BEFORE delete per fix in PR #17 iter 3)
-      { matchUrl: '/rest/v1/mcp_oauth_tokens', status: 201, body: [{}] },
-      // 3. INSERT new refresh token
-      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens', status: 201, body: [{}] },
-      // 4. DELETE the redeemed refresh row
+      // 2. CLAIM (DELETE with revoked_at=is.null filter) -- iter 4 atomic rotation
       { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?token_hash=eq.', status: 200, body: [refreshRow] },
+      // 3. INSERT access token
+      { matchUrl: '/rest/v1/mcp_oauth_tokens', status: 201, body: [{}] },
+      // 4. INSERT new refresh token
+      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens', status: 201, body: [{}] },
     ]);
 
     const res = await handleOauthToken(
@@ -493,6 +493,47 @@ describe('handleOauthToken refresh_token grant', () => {
     expect(body.refresh_token).not.toBe(oldRefresh);
     // Hard-delete of the redeemed refresh fired
     expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('mcp_oauth_refresh_tokens?token_hash=eq.'))).toBe(true);
+  });
+
+  it('refresh CAS loser (concurrent rotation): claim returns 0 rows -> invalid_grant, no mint', async () => {
+    // Two-isolate scenario: both see the row as non-revoked in their SELECT
+    // snapshot, both call claimRefreshTokenForRotation, only one wins the
+    // atomic DELETE. The loser sees 0 rows and aborts without minting.
+    const racyToken = 'racyrefreshtoken';
+    const refreshRow = {
+      token_hash: await sha256Hex(racyToken),
+      client_id: 'cd',
+      user_id: 'u',
+      scope: 'mcp:invoke',
+      aud_uri: CANONICAL_RESOURCE_URI,
+      installation_id: 'i',
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+      created_at: new Date().toISOString(),
+      last_used_at: null,
+      revoked_at: null,
+    };
+    const { fetchImpl, calls } = makeFetchStub([
+      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?select=', status: 200, body: [refreshRow] },
+      // Claim loses the race: 0 rows deleted because the winner already revoked
+      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?token_hash=eq.', status: 200, body: [] },
+    ]);
+    const res = await handleOauthToken(
+      tokenReq(
+        formBody({
+          grant_type: 'refresh_token',
+          refresh_token: racyToken,
+          resource: CANONICAL_RESOURCE_URI,
+          client_id: 'cd',
+        }),
+      ),
+      baseEnv,
+      fetchImpl,
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toBe('invalid_grant');
+    expect((res.body as { error_description: string }).error_description).toMatch(/consumed or revoked/i);
+    // No mint happened (zero INSERT calls)
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
   });
 
   it('replay (redeem a previously-revoked refresh) triggers family revocation', async () => {

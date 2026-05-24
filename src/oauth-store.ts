@@ -165,6 +165,27 @@ export async function deleteRefreshToken(
 }
 
 /**
+ * Atomic claim-and-delete on a refresh-token row. Single-statement DELETE
+ * scoped by token_hash AND revoked_at=is.null AND used_at-ish freshness.
+ * Returns the rows removed so the caller can verify it won the race.
+ *
+ * Two concurrent refresh-token grants presenting the same token can both
+ * see the row as non-revoked in their snapshot SELECT; without an atomic
+ * claim, both would proceed to mintTokenPair and emit two pairs against
+ * one stolen refresh. PostgREST DELETE returns the deleted rows, giving
+ * us a compare-and-claim via the filter. Loser sees 0 rows and aborts.
+ */
+export async function claimRefreshTokenForRotation(
+  db: SupabaseClient,
+  tokenHash: string,
+): Promise<SupabaseResult<OauthRefreshTokenRow>> {
+  return db.remove<OauthRefreshTokenRow>(
+    'mcp_oauth_refresh_tokens',
+    `token_hash=eq.${encodeURIComponent(tokenHash)}&revoked_at=is.null`,
+  );
+}
+
+/**
  * Family revocation: mark every access + refresh token row sharing an
  * `installation_id` as revoked. Triggered on (a) refresh-token replay (the
  * RFC 6819 §5.2.2.3 family-revocation path) and (b) authorization-code
