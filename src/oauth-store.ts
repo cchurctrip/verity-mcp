@@ -77,17 +77,26 @@ export async function findCodeByHash(
 }
 
 /**
- * Mark a code row as used. Returns the updated row (PostgREST representation)
- * so the caller can confirm the update affected exactly the expected row.
+ * Atomically mark a code row as used IFF it is currently unused. The
+ * `used_at=is.null` filter makes the UPDATE a compare-and-set: PostgREST
+ * generates `UPDATE ... WHERE code_hash = ? AND used_at IS NULL`, so two
+ * concurrent /oauth/token requests with the same code can only have ONE
+ * succeed; the loser sees an empty `rows` array and the caller treats that
+ * as a redemption race + denies the second pair.
+ *
+ * Caller MUST check `rows.length === 1` to confirm it won the race.
+ * Without this guard, two isolates racing the same code would both pass
+ * the application-layer `row.used_at === null` check (snapshot reads),
+ * both call markCodeUsed, and both mint a token pair (Bugbot HIGH on PR #17).
  */
-export async function markCodeUsed(
+export async function markCodeUsedIfUnused(
   db: SupabaseClient,
   codeHash: string,
   usedAtIso: string,
 ): Promise<SupabaseResult<OauthCodeRow>> {
   return db.update<OauthCodeRow>(
     'mcp_oauth_codes',
-    `code_hash=eq.${encodeURIComponent(codeHash)}`,
+    `code_hash=eq.${encodeURIComponent(codeHash)}&used_at=is.null`,
     { used_at: usedAtIso },
   );
 }

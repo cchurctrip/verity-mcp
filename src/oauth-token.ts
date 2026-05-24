@@ -47,7 +47,7 @@ import {
   findRefreshTokenByHash,
   insertAccessToken,
   insertRefreshToken,
-  markCodeUsed,
+  markCodeUsedIfUnused,
   revokeInstallationFamily,
 } from './oauth-store';
 
@@ -185,12 +185,8 @@ async function parseTokenRequestBody(req: Request): Promise<Record<string, strin
  */
 async function handleAuthorizationCodeGrant(
   params: Record<string, string>,
-  db: ReturnType<typeof buildSupabaseClient>,
+  db: NonNullable<ReturnType<typeof buildSupabaseClient>>,
 ): Promise<OauthTokenResponse> {
-  if (db === null) {
-    return { body: OAUTH_MISCONFIGURED_BODY as unknown as Record<string, unknown>, status: 503 };
-  }
-
   const code = params['code'];
   const codeVerifier = params['code_verifier'];
   const redirectUri = params['redirect_uri'];
@@ -267,10 +263,17 @@ async function handleAuthorizationCodeGrant(
   if (row.redirect_uri !== redirectUri) {
     return errorResponse('invalid_grant', 'redirect_uri does not match code', 400);
   }
-  if (row.resource_uri !== resource) {
+  // Both sides must independently equal the canonical URI. The request
+  // resource was already canonicalized above; we re-check the stored value
+  // through the same comparator so mixed-case / port-normalization
+  // differences in the DB row do not surface as false-positive
+  // invalid_target (Bugbot finding on PR #17). Phase 2 consent UI is
+  // expected to write the canonical form, but defense in depth in case
+  // a future code path lands a non-canonical value.
+  if (!isCanonicalResourceUri(row.resource_uri)) {
     return errorResponse(
       'invalid_target',
-      'resource does not match the authorization request',
+      'stored resource_uri is not canonical',
       400,
     );
   }
@@ -291,17 +294,26 @@ async function handleAuthorizationCodeGrant(
     return errorResponse('invalid_grant', 'PKCE verification failed', 400);
   }
 
-  // Stamp the code as used BEFORE issuing tokens; if the issuance fails the
-  // code is still consumed and a retry cannot reuse it. The opposite order
-  // would briefly create a window where the code is consumable twice.
+  // Compare-and-set: stamp used_at IFF it is still null. PostgREST translates
+  // this to a single UPDATE with WHERE used_at IS NULL, which is atomic at
+  // the row level. If two concurrent requests with the same code race past
+  // the application-layer row.used_at === null snapshot check above, only
+  // one of them will see a 1-row update; the loser sees 0 rows and we deny
+  // the second pair. Without this guard both isolates would mint a token
+  // pair for the same code (Bugbot HIGH on PR #17).
   const nowIso = new Date().toISOString();
-  const usedMark = await markCodeUsed(db, codeHash, nowIso);
-  if (usedMark.kind !== 'ok' || usedMark.rows.length === 0) {
+  const usedMark = await markCodeUsedIfUnused(db, codeHash, nowIso);
+  if (usedMark.kind !== 'ok') {
     return errorResponse(
       'server_error',
-      usedMark.kind === 'ok' ? 'code mark-used affected 0 rows' : `code mark-used failed: ${describe(usedMark)}`,
+      `code mark-used failed: ${describe(usedMark)}`,
       500,
     );
+  }
+  if (usedMark.rows.length === 0) {
+    // The race loser. The winning request will mint tokens; this request
+    // must not. Treat as invalid_grant from the caller's perspective.
+    return errorResponse('invalid_grant', 'authorization code already used', 400);
   }
 
   return mintTokenPair(db, {
@@ -325,12 +337,8 @@ async function handleAuthorizationCodeGrant(
  */
 async function handleRefreshTokenGrant(
   params: Record<string, string>,
-  db: ReturnType<typeof buildSupabaseClient>,
+  db: NonNullable<ReturnType<typeof buildSupabaseClient>>,
 ): Promise<OauthTokenResponse> {
-  if (db === null) {
-    return { body: OAUTH_MISCONFIGURED_BODY as unknown as Record<string, unknown>, status: 503 };
-  }
-
   const refreshToken = params['refresh_token'];
   const resource = params['resource'];
   const clientId = params['client_id'];

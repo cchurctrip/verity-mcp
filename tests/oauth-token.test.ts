@@ -295,6 +295,53 @@ describe('handleOauthToken authorization_code grant', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('compare-and-set redemption: returns invalid_grant when the UPDATE affects 0 rows (race loser)', async () => {
+    // Two-isolate race scenario: both isolates see used_at=null in their
+    // snapshot SELECT, both call markCodeUsedIfUnused, only one wins.
+    // We simulate the loser path by scripting the UPDATE to return 0 rows
+    // (mimicking what PostgREST returns when used_at IS NULL no longer
+    // holds because another isolate stamped it microseconds ago).
+    const verifier = 'a'.repeat(64);
+    const challenge = await pkceChallenge(verifier);
+    const codeRow = {
+      code_hash: 'unused',
+      client_id: 'claude_desktop',
+      user_id: 'u',
+      redirect_uri: 'http://localhost:0/oauth/callback',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      scope: 'mcp:invoke',
+      resource_uri: CANONICAL_RESOURCE_URI,
+      installation_id: 'i',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      used_at: null,
+    };
+    const { fetchImpl } = makeFetchStub([
+      // SELECT code: row found, used_at null (snapshot before the race winner stamped it)
+      { matchUrl: '/rest/v1/mcp_oauth_codes?select=', status: 200, body: [codeRow] },
+      // PATCH compare-and-set: 0 rows (winner stamped it first)
+      { matchUrl: '/rest/v1/mcp_oauth_codes?code_hash=eq.', status: 200, body: [] },
+    ]);
+
+    const res = await handleOauthToken(
+      tokenReq(
+        formBody({
+          grant_type: 'authorization_code',
+          code: 'racy',
+          code_verifier: verifier,
+          redirect_uri: 'http://localhost:0/oauth/callback',
+          resource: CANONICAL_RESOURCE_URI,
+          client_id: 'claude_desktop',
+        }),
+      ),
+      baseEnv,
+      fetchImpl,
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toBe('invalid_grant');
+    expect((res.body as { error_description: string }).error_description).toMatch(/already used/i);
+  });
+
   it('authorization-code single-use: replay returns invalid_grant AND triggers family revoke', async () => {
     const { fetchImpl, calls } = scriptAuthorizationCodeLookup({
       codeRow: {

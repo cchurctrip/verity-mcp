@@ -71,7 +71,7 @@ function makeStub(
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (url.startsWith('https://verityskills.com')) {
+    if (url.startsWith('https://verityskills.com/')) {
       if (upstreamResp === null) throw new Error('unexpected upstream call');
       return new Response(JSON.stringify(upstreamResp.body), {
         status: upstreamResp.status,
@@ -116,7 +116,7 @@ describe('proxyToolCall OAuth-token branch: happy path', () => {
     // Two outbound calls: token lookup, then upstream skill route.
     expect(calls).toHaveLength(2);
 
-    const upstreamCall = calls.find((c) => c.url.startsWith('https://verityskills.com'))!;
+    const upstreamCall = calls.find((c) => c.url.startsWith('https://verityskills.com/'))!;
     expect(upstreamCall.headers['x-verity-user-id']).toBe(
       '99999999-9999-9999-9999-999999999999',
     );
@@ -151,7 +151,7 @@ describe('proxyToolCall OAuth-token branch: validation failures', () => {
       expect(outcome.reason).toBe('unknown_token');
     }
     // No upstream forward at all.
-    expect(calls.filter((c) => c.url.startsWith('https://verityskills.com'))).toHaveLength(0);
+    expect(calls.filter((c) => c.url.startsWith('https://verityskills.com/'))).toHaveLength(0);
   });
 
   it('expired token returns oauth_token_invalid:expired + NO upstream call', async () => {
@@ -180,7 +180,7 @@ describe('proxyToolCall OAuth-token branch: validation failures', () => {
     if (outcome.kind === 'oauth_token_invalid') {
       expect(outcome.reason).toBe('expired');
     }
-    expect(calls.filter((c) => c.url.startsWith('https://verityskills.com'))).toHaveLength(0);
+    expect(calls.filter((c) => c.url.startsWith('https://verityskills.com/'))).toHaveLength(0);
   });
 
   it('audience mismatch returns oauth_token_invalid:audience_mismatch + NO upstream call', async () => {
@@ -209,7 +209,7 @@ describe('proxyToolCall OAuth-token branch: validation failures', () => {
     if (outcome.kind === 'oauth_token_invalid') {
       expect(outcome.reason).toBe('audience_mismatch');
     }
-    expect(calls.filter((c) => c.url.startsWith('https://verityskills.com'))).toHaveLength(0);
+    expect(calls.filter((c) => c.url.startsWith('https://verityskills.com/'))).toHaveLength(0);
   });
 
   it('oauth_misconfigured: missing SUPABASE_URL returns oauth_token_invalid:oauth_misconfigured + no DB call', async () => {
@@ -295,7 +295,7 @@ describe('proxyToolCall OAuth-token branch: token-passthrough invariant (propert
         expect(outcome.reason).toBe('audience_mismatch');
       }
       // Crucially: ZERO upstream calls for any of the 100 probes.
-      expect(calls.filter((c) => c.url.startsWith('https://verityskills.com'))).toHaveLength(0);
+      expect(calls.filter((c) => c.url.startsWith('https://verityskills.com/'))).toHaveLength(0);
     }
   });
 });
