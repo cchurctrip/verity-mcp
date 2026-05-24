@@ -467,12 +467,12 @@ describe('handleOauthToken refresh_token grant', () => {
     const { fetchImpl, calls } = makeFetchStub([
       // 1. SELECT refresh row
       { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?select=', status: 200, body: [refreshRow] },
-      // 2. DELETE the redeemed refresh row
-      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?token_hash=eq.', status: 200, body: [refreshRow] },
-      // 3. INSERT access token
+      // 2. INSERT access token (mint BEFORE delete per fix in PR #17 iter 3)
       { matchUrl: '/rest/v1/mcp_oauth_tokens', status: 201, body: [{}] },
-      // 4. INSERT refresh token
+      // 3. INSERT new refresh token
       { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens', status: 201, body: [{}] },
+      // 4. DELETE the redeemed refresh row
+      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?token_hash=eq.', status: 200, body: [refreshRow] },
     ]);
 
     const res = await handleOauthToken(

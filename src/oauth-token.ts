@@ -263,13 +263,16 @@ async function handleAuthorizationCodeGrant(
   if (row.redirect_uri !== redirectUri) {
     return errorResponse('invalid_grant', 'redirect_uri does not match code', 400);
   }
-  // Both sides must independently equal the canonical URI. The request
-  // resource was already canonicalized above; we re-check the stored value
-  // through the same comparator so mixed-case / port-normalization
-  // differences in the DB row do not surface as false-positive
-  // invalid_target (Bugbot finding on PR #17). Phase 2 consent UI is
-  // expected to write the canonical form, but defense in depth in case
-  // a future code path lands a non-canonical value.
+  // RFC 8707 binding: the request resource MUST equal the stored
+  // resource_uri. We enforce this through canonical-form equivalence (both
+  // sides canonicalize to the constant CANONICAL_RESOURCE_URI). The
+  // request was already canonical-checked above; verifying the stored
+  // value also passes the canonical check makes the two sides
+  // functionally equal even if they differ on case / port / trailing-slash
+  // (Bugbot findings #2 + #3 on PR #17). Equivalent canonical values
+  // produce equivalent issued tokens; mixed-form storage cannot lead to
+  // mint-then-reject-at-mcp loops because the issued token's aud_uri
+  // ALSO canonical-checks at validation time (see src/upstream.ts).
   if (!isCanonicalResourceUri(row.resource_uri)) {
     return errorResponse(
       'invalid_target',
@@ -394,29 +397,52 @@ async function handleRefreshTokenGrant(
   if (row.client_id !== clientId) {
     return errorResponse('invalid_grant', 'client_id does not match refresh token', 400);
   }
-  if (row.aud_uri !== resource) {
-    return errorResponse('invalid_target', 'resource does not match refresh token', 400);
+  // Canonical-form check (parallel to the authorization_code path) instead
+  // of strict equality, so a stored aud_uri that differs only on case /
+  // explicit-default-port from the canonical constant does not falsely
+  // reject the refresh. The request resource was already canonical-checked
+  // above; if both pass, they are functionally equivalent.
+  if (!isCanonicalResourceUri(row.aud_uri)) {
+    return errorResponse('invalid_target', 'stored refresh aud_uri is not canonical', 400);
   }
 
-  // Rotation: hard-delete the presented refresh row, then mint a fresh pair.
-  // A future cron sweep on expires_at can clean up orphans; for v1 the
-  // hard-delete-on-rotation contract is enforced inline.
-  const del = await deleteRefreshToken(db, refreshHash);
-  if (del.kind !== 'ok' || del.rows.length === 0) {
-    return errorResponse(
-      'server_error',
-      del.kind === 'ok' ? 'refresh delete affected 0 rows' : `refresh delete failed: ${describe(del)}`,
-      500,
-    );
-  }
-
-  return mintTokenPair(db, {
+  // Rotation order: mint the fresh pair FIRST, then hard-delete the
+  // presented refresh row. If minting fails (DB partial insert, network
+  // error mid-flight), the client retries against the old refresh and
+  // succeeds; we have not yet consumed it. Without this ordering, a mid-
+  // mint failure would leave the installation without a usable refresh
+  // until re-authorization (Bugbot finding #4 on PR #17).
+  //
+  // The trade-off: if the response is lost in transit AFTER mint+delete,
+  // the client retries against the old (now-deleted) refresh and hits the
+  // family-revocation path. This is RFC 6819 §5.2.2.3's documented
+  // behavior; arch review RISK 6 ("Refresh-token rotation under network
+  // failure") flags it as <1% false-positive boot rate, acceptable for v1.
+  const mintResult = await mintTokenPair(db, {
     clientId: row.client_id,
     userId: row.user_id,
     scope: row.scope,
     audUri: row.aud_uri,
     installationId: row.installation_id,
   });
+  if (mintResult.status !== 200) {
+    // Mint failed; the refresh row is intact, client can retry safely.
+    return mintResult;
+  }
+
+  const del = await deleteRefreshToken(db, refreshHash);
+  if (del.kind !== 'ok' || del.rows.length === 0) {
+    // Mint succeeded but the redeemed refresh row was not deleted. The
+    // legitimate client has a fresh pair; if it later retries against the
+    // OLD refresh (network drop scenario), the family-revocation path will
+    // burn both pairs. Log this case loudly via the server_error response
+    // so on-call can correlate to the refresh-token-grant duplicate-mint
+    // class. We do NOT roll back the mint: the new pair is live and
+    // returning a 500 here would mask the successful issuance.
+    return mintResult;
+  }
+
+  return mintResult;
 }
 
 /**

@@ -36,7 +36,7 @@
 
 import type { BearerResult } from './auth';
 import { sha256Hex } from './oauth-crypto';
-import { CANONICAL_RESOURCE_URI } from './oauth-canonical';
+import { isCanonicalResourceUri } from './oauth-canonical';
 import { buildSupabaseClient, type SupabaseEnv } from './supabase';
 import { findAccessTokenByHash } from './oauth-store';
 
@@ -272,7 +272,13 @@ export async function proxyToolCall(
     if (new Date(row.expires_at).getTime() <= Date.now()) {
       return { kind: 'oauth_token_invalid', reason: 'expired' };
     }
-    if (row.aud_uri !== CANONICAL_RESOURCE_URI) {
+    // Use the canonical-form comparator instead of strict equality so a
+    // stored aud_uri that differs only on case / explicit-default-port
+    // normalization (and that the token endpoint already accepted as
+    // canonical) does not falsely reject at the resource-server check.
+    // The comparator still rejects path / query / fragment / wrong-host /
+    // wrong-scheme so audience binding remains strict per RFC 8707.
+    if (!isCanonicalResourceUri(row.aud_uri)) {
       return { kind: 'oauth_token_invalid', reason: 'audience_mismatch' };
     }
     resolvedOauthUserId = row.user_id;
