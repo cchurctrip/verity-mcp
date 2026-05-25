@@ -38,6 +38,7 @@ import {
   buildProtectedResourceMetadata,
   type OauthDiscoveryEnv,
 } from './oauth-discovery';
+import { CANONICAL_RESOURCE_URI } from './oauth-canonical';
 import { handleOauthToken, type OauthTokenEnv } from './oauth-token';
 import {
   buildLogLine,
@@ -203,10 +204,29 @@ const handler = {
         consentUrl.searchParams.set('scope', 'mcp:invoke');
       }
       if (!consentUrl.searchParams.has('resource')) {
-        consentUrl.searchParams.set('resource', 'https://mcp.verityskills.com');
+        consentUrl.searchParams.set('resource', CANONICAL_RESOURCE_URI);
       }
       if (!consentUrl.searchParams.has('code_challenge_method')) {
         consentUrl.searchParams.set('code_challenge_method', 'S256');
+      }
+      // Canonicalize the resource: if the client sent a value that points
+      // to the canonical host with at most a bare-slash path (e.g.,
+      // trailing-slash variant `https://mcp.verityskills.com/`, mixed-case
+      // host, explicit-default port :443), normalize to the literal
+      // constant so the Phase 2 consent UI's strict-equality match works.
+      // Claude Desktop 2026-05-25 confirmed: emits
+      // resource=https://mcp.verityskills.com/ (trailing slash) which the
+      // consent UI strict-rejects. We deliberately do NOT use the strict
+      // isCanonicalResourceUri helper here (it rejects any path including
+      // bare `/`); the looser parse-then-compare logic accepts the
+      // equivalent forms a real OAuth client emits without weakening the
+      // security check downstream (consent UI + Worker tools/call audience
+      // check both re-validate against the canonical constant). Values
+      // that fail this loose match pass through and the consent UI
+      // rejects with the same `resource must be "..."` message.
+      const requestedResource = consentUrl.searchParams.get('resource');
+      if (requestedResource !== null && isCanonicalEquivalent(requestedResource)) {
+        consentUrl.searchParams.set('resource', CANONICAL_RESOURCE_URI);
       }
       return Response.redirect(consentUrl.toString(), 302);
     }
@@ -364,6 +384,33 @@ const handler = {
 // is structurally compatible with the SDK's `(env: Env) =>
 // CloudflareOptions | undefined` shape (Env extends ObservabilityEnv).
 export default Sentry.withSentry<Env>(buildSentryConfig, handler);
+
+/**
+ * Loose canonical-equivalence check for the resource param on /authorize.
+ * Returns true if the candidate URI parses as https on the canonical Verity
+ * MCP host (case-insensitive) with no path beyond a bare slash, no query,
+ * no fragment, no userinfo. Used to normalize forms a real OAuth client
+ * emits (notably the trailing-slash variant Claude Desktop sends) before
+ * the 302 to the consent UI's strict-equality check. NOT a security gate
+ * by itself; the consent UI + tools/call audience check both re-validate
+ * against CANONICAL_RESOURCE_URI downstream.
+ */
+function isCanonicalEquivalent(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.host.toLowerCase() !== 'mcp.verityskills.com') return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
+  if (parsed.search !== '') return false;
+  if (parsed.hash !== '') return false;
+  // Accept '' (no path) or '/' (bare slash). Reject any deeper path.
+  if (parsed.pathname !== '' && parsed.pathname !== '/') return false;
+  return true;
+}
 
 function jsonResponse(
   body: unknown,
