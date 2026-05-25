@@ -206,6 +206,22 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
   switch (outcome.kind) {
     case 'forward': {
       const isError = outcome.status < 200 || outcome.status >= 300;
+      // RFC 6750 §3 mandates WWW-Authenticate on every 401. The Worker
+      // already attaches it on bearer_invalid + oauth_token_invalid below,
+      // but the upstream-forward path (auth.kind === 'absent', upstream
+      // returns 401) used to omit it. Without the challenge header, MCP
+      // clients like Claude Desktop receive a bare 401 from tools/call
+      // and have no protocol signal to trigger OAuth, so their lazy-OAuth
+      // UX never opens the browser. Confirmed 2026-05-25 against Claude
+      // Desktop: anonymous tools/call on coordination-heat returned 401
+      // with no WWW-Authenticate; the connector silently stayed
+      // unauthenticated. Adding the same challenge string used on the
+      // other 401 paths closes the gap; Phase 2 consent UI takes over
+      // from there.
+      const headers =
+        outcome.status === 401
+          ? { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE }
+          : undefined;
       return {
         body: {
           jsonrpc: '2.0',
@@ -216,6 +232,7 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
           },
         },
         status: outcome.status,
+        ...(headers !== undefined ? { headers } : {}),
       };
     }
     case 'bearer_invalid':
