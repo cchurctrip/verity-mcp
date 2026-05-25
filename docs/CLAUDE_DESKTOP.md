@@ -1,8 +1,34 @@
 # Claude Desktop install
 
-Claude Desktop reads MCP server configs from `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows).
+Two install paths:
 
-## Direct config snippet (native HTTP, Claude Desktop 2026 builds)
+1. **OAuth via UI Connector** (recommended for end users; one-click sign-in via a magic link, no API key to manage).
+2. **Direct bearer via config file** (recommended for automation, CI, and power users; pinned `vtk_` token).
+
+Both paths reach the same six tools at `https://mcp.verityskills.com`. Pick one or the other for a given install; mixing them just doubles the connectors.
+
+## Path 1: OAuth via the UI Connector (Claude Desktop 1.8500+)
+
+Claude Desktop's UI Connector flow uses OAuth 2.1 (MCP 2025-06-18). Open Settings -> Connectors -> Add custom connector. Paste:
+
+| Field | Value |
+|---|---|
+| Server URL | `https://mcp.verityskills.com/mcp` |
+| Discovery URL | `https://mcp.verityskills.com/.well-known/oauth-authorization-server` |
+| Client ID | `claude_desktop` |
+| Client Secret | leave empty |
+
+Click Connect. Claude Desktop opens the consent screen at `https://verityskills.com/oauth/mcp/authorize` in your browser. Sign in via the magic link delivered to your inbox (the first install creates a Verity account if needed; existing accounts sign in to the same email). Approve the consent. Claude Desktop receives the OAuth token and registers the six tools.
+
+Verify by typing `/verity` in a new Claude conversation, or by asking "Use verity-score on NVDA".
+
+Notes:
+- The `client_id` value (`claude_desktop`) is a fixed string; v1 of the OAuth surface ships a pre-registered allowlist of four clients. RFC 7591 dynamic client registration is deferred.
+- The consent screen lives on `https://verityskills.com`; the URL bar is visible so you can confirm you are signing in to Verity, not a phishing page.
+- Tokens are short-lived (1 hour access, 30 day refresh, automatic rotation per RFC 6749). Re-signing in is rare; Claude Desktop handles the refresh transparently.
+- Tools that need a Pro or Fund tier (e.g. unlimited verity-score calls) still gate on tier; the OAuth flow grants access to your account's existing entitlement, it does not upgrade you.
+
+## Path 2: Direct config snippet (native HTTP, Claude Desktop 2026 builds)
 
 Paste into the JSON file's `mcpServers` block (create the object if it doesn't exist):
 
