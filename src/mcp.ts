@@ -58,6 +58,19 @@ export type McpEnv = ProxyEnv;
 export const PROTOCOL_VERSION = '2025-03-26';
 export const SERVER_INFO = { name: 'verity-mcp', version: '1.0.0' } as const;
 
+// RFC 6750 §3 + RFC 9728 §5.1. Every 401 emitted from the Worker carries
+// this header so MCP clients can discover the protected-resource metadata
+// document from a single probe call (the "this connector needs auth, here
+// is how" signal Claude Desktop and ChatGPT Desktop key off).
+//
+// The value uses double quotes per RFC 7235 §2.1; the resource_metadata
+// parameter is the RFC 9728-defined pointer to the document on the same
+// origin as the resource. Kept as a single exported constant so future
+// changes (e.g. adding scope= or error= parameters per RFC 6750) land in
+// one place.
+export const WWW_AUTHENTICATE_VALUE =
+  'Bearer realm="mcp.verityskills.com", resource_metadata="https://mcp.verityskills.com/.well-known/oauth-protected-resource"';
+
 // JSON-RPC 2.0 id is `string | number | null` per spec § 4. Requests without
 // an id (notifications) are not supported here: the property test predicate
 // rejects them as -32600, matching the MCP request/response model.
@@ -166,6 +179,10 @@ export function buildToolsListResult(): {
 export interface McpResponse {
   body: unknown;
   status: number;
+  // VRT-166: optional response headers beyond the entry layer's default CORS
+  // + content-type. Currently used to attach the WWW-Authenticate challenge
+  // to every 401 response (RFC 6750 + RFC 9728 resource_metadata pointer).
+  headers?: Record<string, string>;
 }
 
 // outcomeToResponse maps each ProxyOutcome to its HTTP-status + body. Kept
@@ -205,10 +222,34 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
       return {
         body: {
           code: 'INVALID_BEARER_FORMAT',
-          error: "Authorization header must be 'Bearer vtk_<token>'",
+          error: "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'",
         },
         status: 401,
+        headers: { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE },
       };
+    case 'oauth_token_invalid': {
+      // The reason narrowing drives both the HTTP status (401 vs 503) and
+      // the error code in the body. Audience mismatch and unknown/expired
+      // tokens are 401 with a WWW-Authenticate challenge so clients know to
+      // re-run the OAuth flow. Misconfigured / killed / db-unreachable are
+      // 503 with Retry-After so on-call sees the operational signal.
+      const r = outcome.reason;
+      if (r === 'oauth_misconfigured' || r === 'oauth_killed' || r === 'db_unreachable') {
+        return {
+          body: { code: r.toUpperCase(), error: oauthReasonHuman(r) },
+          status: 503,
+          headers: { 'Retry-After': '60' },
+        };
+      }
+      // r === 'unknown_token' | 'expired' | 'audience_mismatch'
+      const errCode =
+        r === 'audience_mismatch' ? 'INVALID_TOKEN_AUDIENCE' : 'OAUTH_TOKEN_INVALID';
+      return {
+        body: { code: errCode, error: oauthReasonHuman(r) },
+        status: 401,
+        headers: { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE },
+      };
+    }
     case 'tool_disabled':
       return {
         body: { code: 'TOOL_DISABLED', tool: truncateEchoedIdent(outcome.tool) },
@@ -276,6 +317,36 @@ function truncateEchoedIdent(name: string): string {
     : name;
 }
 
+// Human-readable error strings for each oauth_token_invalid reason. The
+// strings are stable (clients log them) but carry no token value. Audience
+// mismatch surfaces a distinct INVALID_TOKEN_AUDIENCE code per arch review
+// R1; the others share OAUTH_TOKEN_INVALID with a per-reason message so
+// on-call can triage from one PR-comment search.
+function oauthReasonHuman(
+  reason:
+    | 'unknown_token'
+    | 'expired'
+    | 'audience_mismatch'
+    | 'db_unreachable'
+    | 'oauth_misconfigured'
+    | 'oauth_killed',
+): string {
+  switch (reason) {
+    case 'unknown_token':
+      return 'OAuth access token not recognized. Re-authorize via the OAuth flow.';
+    case 'expired':
+      return 'OAuth access token expired. Use the refresh_token grant or re-authorize.';
+    case 'audience_mismatch':
+      return 'OAuth access token not issued for this resource (audience mismatch).';
+    case 'db_unreachable':
+      return 'OAuth token store temporarily unreachable. Retry in 60 seconds.';
+    case 'oauth_misconfigured':
+      return 'OAuth not configured on this Worker. Operator action required.';
+    case 'oauth_killed':
+      return 'OAuth temporarily disabled by operator. Use a vtk_ user API key.';
+  }
+}
+
 // Maps a ProxyOutcome to the (upstreamStatus, errorDetail) pair the
 // entry-layer log line carries. Exhaustively switched on outcome.kind so a
 // new ProxyOutcome variant becomes a compile error here, not a runtime
@@ -299,6 +370,8 @@ function outcomeLogFields(outcome: ProxyOutcome): {
       return { upstreamStatus: null, errorDetail: `TOOL_DISABLED:${truncateEchoedIdent(outcome.tool)}` };
     case 'unknown_tool':
       return { upstreamStatus: null, errorDetail: `unknown_tool:${truncateEchoedIdent(outcome.tool)}` };
+    case 'oauth_token_invalid':
+      return { upstreamStatus: null, errorDetail: `oauth_token_invalid:${outcome.reason}` };
   }
 }
 
@@ -473,11 +546,12 @@ export async function handleMcpRequest(
 
       const auth = readBearer(req);
       const outcome = await proxyToolCall(toolName, args, auth, requestId, env, fetchImpl);
-      const { body: respBody, status } = outcomeToResponse(outcome, envelope.id);
+      const { body: respBody, status, headers: respHeaders } = outcomeToResponse(outcome, envelope.id);
       const { upstreamStatus, errorDetail } = outcomeLogFields(outcome);
       return {
         body: respBody,
         status,
+        ...(respHeaders !== undefined ? { headers: respHeaders } : {}),
         requestId,
         tool: truncateEchoedIdent(toolName),
         outcomeKind: outcome.kind,

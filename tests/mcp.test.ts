@@ -261,12 +261,18 @@ describe('outcomeToResponse', () => {
 
   it('bearer_invalid returns HTTP 401 with INVALID_BEARER_FORMAT body (non JSON-RPC envelope)', () => {
     const outcome: ProxyOutcome = { kind: 'bearer_invalid' };
+    // VRT-166: message extended to mention both vtk_ (user key) and vto_
+    // (OAuth token) prefixes; 401 now carries WWW-Authenticate per RFC 6750.
     expect(outcomeToResponse(outcome, id)).toEqual({
       body: {
         code: 'INVALID_BEARER_FORMAT',
-        error: "Authorization header must be 'Bearer vtk_<token>'",
+        error: "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'",
       },
       status: 401,
+      headers: {
+        'WWW-Authenticate':
+          'Bearer realm="mcp.verityskills.com", resource_metadata="https://mcp.verityskills.com/.well-known/oauth-protected-resource"',
+      },
     });
   });
 
@@ -487,7 +493,7 @@ describe('handleMcpRequest', () => {
     expect(r.status).toBe(401);
     expect(r.body).toEqual({
       code: 'INVALID_BEARER_FORMAT',
-      error: "Authorization header must be 'Bearer vtk_<token>'",
+      error: "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'",
     });
   });
 

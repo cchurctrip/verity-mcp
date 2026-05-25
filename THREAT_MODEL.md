@@ -94,8 +94,86 @@
 3. Suspected upstream skill-route compromise: out of scope here; see `cchurctrip/verity:THREAT_MODEL.md` (separate doc).
 4. Suspected Cloudflare account compromise: owner action per Cloudflare's account recovery process. Worker can be redeployed from `cchurctrip/verity-mcp` source.
 
+---
+
+## OAuth 2.1 Authorization Surface (VRT-166 Phase 1)
+
+**Surface added 2026-05-22.** The Worker becomes both an OAuth resource server (validates `vto_*` access tokens at `tools/call`) and an OAuth authorization-server token endpoint (`POST /oauth/token`). The consent UI lives on the Next.js side (`verityskills.com/oauth/mcp/authorize`, Phase 2) and is reviewed in `cchurctrip/verity:THREAT_MODEL.md`. The pre-existing `vtk_*` user-API-key path stays as a parallel install option indefinitely.
+
+**Storage**: four tables on the Verity Supabase project (`mcp_oauth_clients`, `mcp_oauth_codes`, `mcp_oauth_tokens`, `mcp_oauth_refresh_tokens`), all RLS-on, service-role only. Schema owned by Phase 0 migrations 046/047/048.
+
+**Token format**: `vto_<base62>` for access tokens (1h TTL), opaque base62 for refresh tokens (30d TTL). Both stored as SHA-256 hex hashes (`token_hash` primary key on each table). Raw tokens never appear in any DB column or log line. Same hashing posture as `vtk_*` user keys per upstream `lib/apiKeyAuth.ts`.
+
+**Canonical resource URI**: `https://mcp.verityskills.com` (lowercase, no path, no trailing slash, no fragment). Audience binding per RFC 8707; comparator at `src/oauth-canonical.ts`.
+
+### S. Spoofing (OAuth)
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Attacker registers a malicious `client_id` (e.g. `claude_desktop`) and intercepts authorization codes by claiming the same name. | Low | High | v1 allowlist-only registration. `client_id` is operator-controlled; no self-service path. Redirect-URI allowlist per client (arch review R4) limits where codes can land. |
+| Attacker presents a stolen refresh token from a victim's leaked browser storage. | Medium | High | Refresh-token rotation per RFC 6819 §5.2.2.3 (`src/oauth-token.ts:handleRefreshTokenGrant`); replay attempt revokes the family (`src/oauth-store.ts:revokeInstallationFamily`); legitimate client gets booted on next refresh, surfacing the breach. False-positive boot rate documented as <1% acceptable per arch review RISK 6. |
+| Attacker presents a forged `vto_*` access token. | Negligible | High | Token stored as SHA-256 hash in `mcp_oauth_tokens.token_hash`; verification compares hash of incoming bearer against stored hash (`src/upstream.ts:proxyToolCall` OAuth branch). No raw token in DB. Hash mismatch returns 401 with `WWW-Authenticate: Bearer realm=..., resource_metadata=...`. |
+
+### T. Tampering (OAuth)
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Attacker tampers `code_challenge` in flight between client and authorize endpoint to substitute their own verifier. | Negligible | High | HTTPS-only on `verityskills.com` and `mcp.verityskills.com` (HSTS via Cloudflare custom-domain default). PKCE S256 verifies `base64url(sha256(code_verifier)) === stored code_challenge` at the token endpoint (`src/oauth-crypto.ts:verifyPkceS256` with constant-time compare); substitution fails. |
+| Attacker tampers `resource` parameter to bind the token to a different MCP server. | Low | High | `/oauth/token` validates request `resource` against stored `mcp_oauth_codes.resource_uri` (exact match) AND against the canonical URI (`src/oauth-canonical.ts:isCanonicalResourceUri`). Mismatch returns `invalid_target` per RFC 8707 §3. Worker re-validates `aud_uri` on every tool call. |
+
+### R. Repudiation (OAuth)
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| User claims they never authorized Claude Desktop / ChatGPT / Cursor / Gemini. | Low | Medium | `mcp_oauth_tokens.created_at` + `last_used_at` timestamps; consent decision logged with `installation_id` at issuance. Future "Apps connected to your account" UI groups by `(client_id, installation_id)` for per-device audit + revoke. |
+| Insider revokes a token line to claim a user never had access. | Negligible | Low | Refresh-token revocation is additive (`revoked_at` column, no DELETE); access-token revocation is hard-delete but the audit signal lives on the parallel refresh-token row. Cloudflare + Supabase audit logs capture admin-side operations. |
+
+### I. Information disclosure (OAuth)
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Authorization code leaks via Referer header from consent screen to attacker site. | Low | High | Consent screen at `verityskills.com` (Phase 2) sets `Referrer-Policy: strict-origin-when-cross-origin` (middleware-side); the redirect-to-client uses 302 with `Location` set to the client's pre-registered redirect URI; the redirect-target page does not see the consent-screen URL. |
+| Access token leaks via Sentry breadcrumb / log line. | Medium (without mitigation) | Critical | `src/observability.ts:scrubAuthorization` extended for VRT-166 to (a) scrub the `vto_*` value pattern from any string field via regex replace, and (b) redact body keys `code`, `refresh_token`, `access_token`, `code_verifier`, `client_secret` in addition to the pre-existing `authorization` + `x-verity-key` header redaction. WeakSet cycle-tracking unchanged. |
+| Refresh token leaks via authorize endpoint redirect on error. | Negligible | High | Refresh tokens are never issued at the authorize endpoint; they only come back from `POST /oauth/token` response body. Authorize endpoint redirects only carry `code` + `state`. |
+| Consent UI leaks user's email to client via the authorization code. | N/A | N/A | Authorization codes carry no user data; they are opaque random strings looked up server-side. User identity is bound at token validation, not in the code itself. |
+
+### D. Denial of service (OAuth)
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Attacker hammers `/oauth/token` with a single scraped code brute-forcing PKCE. | Medium | Medium | Per-code rate limit at `src/oauth-rate-limit.ts`: 11th request on one code hash returns 429 with `Retry-After: 60`. In-isolate map for Phase 1; KV upgrade is a follow-up. Authorization-code single-use plus PKCE constant-time compare already cover the brute-force class. |
+| Attacker hammers `/oauth/token` with junk codes to exhaust DB. | Medium | Medium | Hash-lookup on `mcp_oauth_codes.code_hash` is O(1) with B-tree index. Expired codes cleaned via cron (deferred Phase 1+ follow-up; TTL is 10 minutes per spec). Cloudflare WAF rule per-IP is a follow-up hardening. |
+| Refresh-token grant abuse: attacker holding 1 leaked token rotates infinitely. | Low | Low | Each rotation hard-deletes the redeemed refresh row, so the same attacker presenting the same old token after the first redeem hits the `unknown_token` branch. Family revocation on replay if the attacker races the legitimate client. |
+| Discovery endpoints (`.well-known/oauth-*`) hammered for fingerprinting. | Low | Negligible | Static JSON responses, cacheable; Cloudflare CDN absorbs. |
+
+### E. Elevation of privilege (OAuth)
+
+| Threat | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| OAuth token issued for scope `mcp:invoke` is used to call admin endpoints. | Negligible | High | Admin endpoints (`app/api/admin/*` on the upstream) require `validateAdminAuth` (cookie-based session, not bearer); the OAuth bearer is never accepted at admin routes. Worker only forwards to `app/api/skills/*` per `TOOL_ROUTES` (`src/upstream.ts`). |
+| Trial-tier OAuth user uses the token to bypass tier limits at the skill route. | Low | Medium | Tier gating happens upstream at `app/api/skills/*` via `getEffectiveLimits()`. The Worker forwards the OAuth token's resolved `user_id` via `x-verity-user-id` header (NOT the raw OAuth token). Upstream skills look up the user and apply tier limits regardless of how the request arrived. |
+| Forwarding the OAuth token to upstream as-is (token passthrough). | N/A (banned by MCP 2025-06-18) | Critical | `src/upstream.ts:buildUpstreamHeadersForOauth` MUST NOT set `x-verity-key: vto_<token>` or include the raw token in any URL or header. Instead, the Worker validates the OAuth token at the `proxyToolCall` entry, resolves to `user_id`, and forwards `x-verity-user-id: <uuid>`. The OAuth token never leaves the Worker. Pinned by integration test (`tests/oauth-passthrough.regression.test.ts`) that asserts no `vto_*` value ever appears in any upstream-fetch URL or header. Same posture as the `vtk_*` user-key path: upstream knows the user, never sees the credential format the client used. |
+
+### Redirect-URI exact-match (Phase 1 boundary, Phase 2 validator)
+
+Per arch review R4: the redirect-URI exact-match logic must special-case `http://localhost:*/oauth/callback` for installed-app clients (Claude Desktop, Cursor, Gemini CLI) per RFC 8252 §7.3. The seeded sentinel `http://localhost:0/oauth/callback` in `mcp_oauth_clients.redirect_uris` is recognized by Phase 2's port-wildcard comparator at `lib/oauthMcp.ts`. Phase 1's `/oauth/token` validates `redirect_uri` strictly via equality against the stored value on the code row (`src/oauth-token.ts:handleAuthorizationCodeGrant`); the looser localhost-port-wildcard match runs at the authorize step on the Next.js side. Phase 1 documents the boundary; Phase 2 owns the validator implementation.
+
+### Kill switches
+
+- `MCP_KILL_SWITCH=on` (existing) returns 503 for everything except `/health` and OPTIONS preflight, including the OAuth surface. Operator-level off-switch for an incident.
+- `MCP_OAUTH_KILL_SWITCH=on` (VRT-166 new) returns 503 from `/oauth/token`, omits OAuth fields from the discovery doc, and rejects `vto_*` bearers at `/mcp` (returns 503 OAUTH_KILLED). `vtk_*` user-key bearers continue to work. Used to disable OAuth alone without breaking the API-key path.
+
+### References (OAuth-specific)
+
+- Parent spec: `cchurctrip/verity:mydocs/specs/2026-05-22_VRT-166_oauth-21-mcp-server.md`
+- Phase 1 sub-spec: `docs/specs/2026-05-22_VRT-166-phase1_oauth-worker.md`
+- Arch review R1-R8: `cchurctrip/verity:docs/arch-review-vrt-166-oauth.md`
+- MCP 2025-06-18 Authorization: https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization
+- RFC 6749 OAuth 2.0; RFC 6750 Bearer Token Usage; RFC 6819 OAuth 2.0 Threat Model; RFC 7636 PKCE; RFC 8252 OAuth for Native Apps; RFC 8414 AS Metadata; RFC 8707 Resource Indicators; RFC 9728 Protected Resource Metadata.
+
 ## References
 
 - `~/.claude/PIPELINE.md` Gate 7 STRIDE requirement
 - Gate 2 cold-context review: `cchurctrip/verity:docs/arch-review-vrt-146-mcp-worker.md` BLOCKING #2, BLOCKING #3, REQUIRED #6, REQUIRED #7, REQUIRED #8, REQUIRED #11
+- VRT-166 Gate 2 cold-context review: `cchurctrip/verity:docs/arch-review-vrt-166-oauth.md`
 - Scar-tissue memories: `feedback_role_gate_required_after_bearer_to_validate.md`, `feedback_js_regex_dollar_end_anchor_newline.md`, `feedback_rate_limiter_retry_after_unix_timestamp_class.md`

@@ -53,7 +53,8 @@ export type OutcomeKind =
   | 'tool_disabled'
   | 'unknown_tool'
   | 'upstream_5xx'
-  | 'upstream_network_error';
+  | 'upstream_network_error'
+  | 'oauth_token_invalid';
 
 // LogLineFields is the canonical shape of every structured log line emitted
 // from src/index.ts. Keeping the OutcomeKind formal on the line (instead of
@@ -193,7 +194,45 @@ export function scrubAuthorization(
   return event;
 }
 
-const REDACTED_HEADER_NAMES = new Set(['authorization', 'x-verity-key']);
+// VRT-166 Phase 1 extension (per arch review STRIDE Info-disclosure row 2):
+// also strip unambiguously OAuth-credential body keys (refresh_token,
+// access_token, code_verifier, client_secret) whose values would otherwise
+// carry the raw token / PKCE-verifier into Sentry breadcrumbs if any
+// future handler ever passed the parsed body to captureException.
+//
+// The OAuth `code` parameter is NOT in this set. While `code` would carry
+// the raw authorization-code value in a Sentry breadcrumb, a global
+// redaction of every field named `code` would also blank unrelated fields
+// (HTTP status code, error code, country code, etc.) across non-OAuth
+// breadcrumbs. The narrower defenses cover the realistic leak vectors:
+// (a) the OAuth handler never passes the parsed body to Sentry directly,
+// (b) the value-pattern scrub below catches vto_* in any string field,
+// (c) authorization codes never reach the resource-server path (they are
+// only sent to /oauth/token and consumed once). Documented under arch
+// review RISK 7 polish: a future iteration can add a path-aware scrubber
+// that strips `code` only when the parent breadcrumb context is the
+// /oauth/token request body.
+const REDACTED_HEADER_NAMES = new Set([
+  'authorization',
+  'x-verity-key',
+  'refresh_token',
+  'access_token',
+  'code_verifier',
+  'client_secret',
+]);
+
+// VRT-166 Phase 1: value-level scrub patterns. Catches a raw OAuth access
+// token (vto_<...>) that ends up in a string field whose key is NOT in the
+// redacted-name set (e.g. a free-form error message, a URL query string, a
+// SQL fragment in an exception .message). The `vtk_*` user-API-key pattern
+// is intentionally NOT scrubbed here: the existing structured log path
+// never emits the token (only auth_present boolean), and a value-level
+// scrub on vtk_ would corrupt structured fields like `error_detail`
+// strings that quote-and-truncate the token for debugging.
+//
+// The vto_ pattern is anchored with a non-alphanumeric or end-of-string
+// boundary so it does not over-match identifiers like `mvto_foo`.
+const VTO_TOKEN_VALUE_PATTERN = /\bvto_[A-Za-z0-9]+/g;
 
 function scrubInObject(obj: Record<string, unknown>, seen: WeakSet<object>): void {
   if (seen.has(obj)) return;
@@ -204,9 +243,17 @@ function scrubInObject(obj: Record<string, unknown>, seen: WeakSet<object>): voi
       continue;
     }
     const value = obj[key];
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === 'object' && item !== null) {
+    if (typeof value === 'string') {
+      // Strip any embedded vto_ token from free-form string fields.
+      const scrubbed = value.replace(VTO_TOKEN_VALUE_PATTERN, '[redacted]');
+      if (scrubbed !== value) obj[key] = scrubbed;
+    } else if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        const item = value[i];
+        if (typeof item === 'string') {
+          const scrubbedItem = item.replace(VTO_TOKEN_VALUE_PATTERN, '[redacted]');
+          if (scrubbedItem !== item) value[i] = scrubbedItem;
+        } else if (typeof item === 'object' && item !== null) {
           scrubInObject(item as Record<string, unknown>, seen);
         }
       }

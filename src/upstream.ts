@@ -35,9 +35,14 @@
 //      Sentry + PostHog events.
 
 import type { BearerResult } from './auth';
+import { sha256Hex } from './oauth-crypto';
+import { isCanonicalResourceUri } from './oauth-canonical';
+import { buildSupabaseClient, type SupabaseEnv } from './supabase';
+import { findAccessTokenByHash } from './oauth-store';
 
-export interface ProxyEnv {
+export interface ProxyEnv extends SupabaseEnv {
   MCP_TOOLS_DISABLED?: string;
+  MCP_OAUTH_KILL_SWITCH?: string;
 }
 
 const UPSTREAM_BASE = 'https://verityskills.com';
@@ -101,9 +106,24 @@ export function isToolKillSwitched(toolName: string, env: ProxyEnv): boolean {
 }
 
 // Build the headers for an upstream call. x-request-id is ALWAYS set
-// (coupling #9 propagation). x-verity-key is set ONLY when auth.kind ===
-// 'valid'; the value is the raw vtk_ token without any Bearer prefix
-// (coupling #8 hash equality at lib/apiKeyAuth.ts).
+// (coupling #9 propagation).
+//
+// Two auth-disposition branches, both never put the raw bearer in any
+// non-Verity-controlled header:
+//
+//   auth.kind === 'valid'              x-verity-key carries the raw vtk_*
+//                                       token (no Bearer prefix); upstream
+//                                       lib/apiKeyAuth.ts hashApiKey SHA-256s
+//                                       it (coupling #8 hash equality).
+//   auth.kind === 'valid_oauth_token'  x-verity-user-id carries the resolved
+//                                       UUID from mcp_oauth_tokens. The OAuth
+//                                       token itself NEVER appears in any
+//                                       upstream URL or header. MCP 2025-06-18
+//                                       explicitly forbids "token passthrough"
+//                                       (see parent spec line 387 + arch
+//                                       review STRIDE E row 3). Caller
+//                                       passes the resolved user_id via
+//                                       buildUpstreamHeadersForOauth.
 export function buildUpstreamHeaders(auth: BearerResult, requestId: string): Headers {
   const headers = new Headers();
   headers.set('content-type', 'application/json');
@@ -111,6 +131,21 @@ export function buildUpstreamHeaders(auth: BearerResult, requestId: string): Hea
   if (auth.kind === 'valid') {
     headers.set('x-verity-key', auth.token);
   }
+  // valid_oauth_token: caller resolves the token and uses
+  // buildUpstreamHeadersForOauth to set x-verity-user-id instead.
+  return headers;
+}
+
+/**
+ * Headers for the OAuth-token forward path: x-verity-user-id with the
+ * resolved UUID, x-request-id for tracing, no x-verity-key, no raw token
+ * anywhere. The vto_* token NEVER appears in the returned Headers.
+ */
+export function buildUpstreamHeadersForOauth(userId: string, requestId: string): Headers {
+  const headers = new Headers();
+  headers.set('content-type', 'application/json');
+  headers.set('x-request-id', requestId);
+  headers.set('x-verity-user-id', userId);
   return headers;
 }
 
@@ -160,7 +195,24 @@ export type ProxyOutcome =
   | { kind: 'tool_disabled'; tool: string }
   | { kind: 'unknown_tool'; tool: string }
   | { kind: 'upstream_5xx'; upstreamStatus: number; upstreamBody: unknown; cause: string }
-  | { kind: 'upstream_network_error'; errorName: string; cause: string };
+  | { kind: 'upstream_network_error'; errorName: string; cause: string }
+  // VRT-166: OAuth token failed validation. `reason` is one of:
+  //   'unknown_token'                token hash not found in mcp_oauth_tokens
+  //   'expired'                      stored expires_at <= now
+  //   'audience_mismatch'            stored aud_uri !== CANONICAL_RESOURCE_URI
+  //   'db_unreachable'               Supabase HTTP error or network failure
+  //   'oauth_misconfigured'          SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing
+  //   'oauth_killed'                 MCP_OAUTH_KILL_SWITCH === 'on'
+  | {
+      kind: 'oauth_token_invalid';
+      reason:
+        | 'unknown_token'
+        | 'expired'
+        | 'audience_mismatch'
+        | 'db_unreachable'
+        | 'oauth_misconfigured'
+        | 'oauth_killed';
+    };
 
 export async function proxyToolCall(
   toolName: string,
@@ -193,6 +245,45 @@ export async function proxyToolCall(
     return { kind: 'bearer_invalid' };
   }
 
+  // VRT-166 OAuth-token validation branch. The vto_* token MUST be hashed,
+  // looked up in mcp_oauth_tokens, expiry-checked, audience-checked
+  // (canonical: https://mcp.verityskills.com), and resolved to a user_id.
+  // The resolved user_id is then forwarded upstream via x-verity-user-id;
+  // the raw token NEVER appears in any upstream URL or header (MCP
+  // 2025-06-18 token-passthrough ban; tested via fetch interceptor).
+  let resolvedOauthUserId: string | null = null;
+  if (auth.kind === 'valid_oauth_token') {
+    if (env.MCP_OAUTH_KILL_SWITCH === 'on') {
+      return { kind: 'oauth_token_invalid', reason: 'oauth_killed' };
+    }
+    const db = buildSupabaseClient(env, fetchImpl);
+    if (db === null) {
+      return { kind: 'oauth_token_invalid', reason: 'oauth_misconfigured' };
+    }
+    const tokenHash = await sha256Hex(auth.token);
+    const lookup = await findAccessTokenByHash(db, tokenHash);
+    if (lookup.kind !== 'ok') {
+      return { kind: 'oauth_token_invalid', reason: 'db_unreachable' };
+    }
+    if (lookup.rows.length === 0) {
+      return { kind: 'oauth_token_invalid', reason: 'unknown_token' };
+    }
+    const row = lookup.rows[0]!;
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      return { kind: 'oauth_token_invalid', reason: 'expired' };
+    }
+    // Use the canonical-form comparator instead of strict equality so a
+    // stored aud_uri that differs only on case / explicit-default-port
+    // normalization (and that the token endpoint already accepted as
+    // canonical) does not falsely reject at the resource-server check.
+    // The comparator still rejects path / query / fragment / wrong-host /
+    // wrong-scheme so audience binding remains strict per RFC 8707.
+    if (!isCanonicalResourceUri(row.aud_uri)) {
+      return { kind: 'oauth_token_invalid', reason: 'audience_mismatch' };
+    }
+    resolvedOauthUserId = row.user_id;
+  }
+
   // For an absent bearer, the spec is explicit: forward anyway without
   // x-verity-key and let upstream decide the status. Keeps the Worker thin
   // and single-source-of-auth-truth. All six tools now back authenticated
@@ -200,7 +291,10 @@ export async function proxyToolCall(
   // authenticated subject scorer), so an absent key forwards with no
   // x-verity-key and upstream returns its own 401. No per-tool special case
   // is needed here: the header-build path is uniform.
-  const headers = buildUpstreamHeaders(auth, requestId);
+  const headers =
+    resolvedOauthUserId !== null
+      ? buildUpstreamHeadersForOauth(resolvedOauthUserId, requestId)
+      : buildUpstreamHeaders(auth, requestId);
   const url = `${UPSTREAM_BASE}${TOOL_ROUTES[toolName]}`;
 
   let upstream: Response;

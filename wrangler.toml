@@ -33,3 +33,28 @@ name = "verity-mcp-preview"
 # Sentry DSN is set as a Wrangler secret named SENTRY_DSN (not in this file).
 [observability]
 enabled = true
+
+# VRT-166 OAuth 2.1 surface. Three Wrangler secrets gate the OAuth path:
+#
+#   SUPABASE_URL                  https URL of the Verity Supabase project. The
+#                                  Worker uses this to hit the PostgREST
+#                                  endpoint at ${SUPABASE_URL}/rest/v1/... for
+#                                  the four mcp_oauth_* tables.
+#   SUPABASE_SERVICE_ROLE_KEY     service-role JWT for the same project. RLS
+#                                  bypass per Supabase default. Owner-set via
+#                                  `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`
+#                                  AFTER PR merge and BEFORE the OAuth surface
+#                                  is announced. Absence at request time
+#                                  returns oauth_misconfigured 503 with a
+#                                  Retry-After hint; vtk_* user-key path is
+#                                  unaffected.
+#   MCP_OAUTH_KILL_SWITCH         literal string 'on' disables every OAuth
+#                                  endpoint (/.well-known/oauth-* omits OAuth
+#                                  fields; /oauth/token returns 503;
+#                                  validation of vto_* tokens at /mcp returns
+#                                  503 OAUTH_KILLED). vtk_* path stays live.
+#                                  Default off; owner toggleable without redeploy.
+#
+# None of the three are set here; all three live as Wrangler secrets per env.
+# Section kept as documentation only so a future reviewer can grep "OAuth"
+# in this file and find the wiring.
