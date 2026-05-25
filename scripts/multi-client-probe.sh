@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# multi-client-probe.sh: VRT-165 live-deploy verification harness.
+# multi-client-probe.sh: live-deploy verification harness.
 #
-# Probes the four target MCP client transport surfaces against the live
-# Worker. Exits 0 only when 9 of 9 probes pass. Run as the final step of
-# `npm run deploy` so a deploy that breaks any transport surfaces fails
-# at deploy time, not at first user call.
+# 12 probes total against the live Worker:
+#   - Probes 1 to 9: VRT-165 transport matrix (Cursor + Claude Desktop +
+#     ChatGPT Desktop + Gemini + Comet GET/POST /sse).
+#   - Probes 10 to 12: VRT-166 OAuth 2.1 surface (discovery, /oauth/token
+#     authorization_code rejection shape, vto_ bearer rejection on /mcp).
+#
+# Run as the final step of `npm run deploy` so a deploy that breaks any
+# transport or OAuth surface fails at deploy time, not at first user call.
 #
 # Usage:
 #   ./scripts/multi-client-probe.sh https://mcp.verityskills.com
 #
-# Requires the VERITY_MCP_TEST_KEY env var (the live integration-test
-# API key). Without it the script skips with exit 0 so a non-secret
-# context (a fork PR, a non-secret CI run) does not break.
+# The 9 transport probes require the VERITY_MCP_TEST_KEY env var (the live
+# integration-test API key). Without it those 9 are skipped. The 3 OAuth
+# probes always run because the OAuth discovery + token endpoints are
+# public and the bearer probe asserts rejection (no real token needed).
 #
 # Exit codes:
-#   0: 9 of 9 probes pass (or skipped cleanly without the secret)
+#   0: every run probe passed (transport probes may be skipped without the key)
 #   1: a probe failed; the failing probe is named on stderr
 #   2: a required CLI tool is missing (jq, curl)
 
@@ -32,13 +37,7 @@ fi
 BASE_URL="${1:-https://mcp.verityskills.com}"
 TEST_KEY="${VERITY_MCP_TEST_KEY:-}"
 
-if [ -z "$TEST_KEY" ]; then
-  echo "SKIP: VERITY_MCP_TEST_KEY not set. multi-client-probe needs the live test key."
-  echo "      Export it locally to run probes; CI without the secret skips cleanly."
-  exit 0
-fi
-
-echo "VRT-165 multi-client probe vs $BASE_URL"
+echo "Multi-client probe vs $BASE_URL"
 echo "================================================================"
 
 PASS_COUNT=0
@@ -53,6 +52,96 @@ fail() {
   printf '         %s\n' "$2" >&2
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
+
+# ================================================================
+# VRT-166 OAuth 2.1 surface probes (run unconditionally; public endpoints)
+# ================================================================
+
+# Probe 10: discovery endpoints conformant per RFC 8414 + RFC 9728.
+# Verifies registration_endpoint is OMITTED (R4: no DCR in v1),
+# code_challenge_methods_supported is exactly ["S256"], scopes_supported
+# includes "mcp:invoke".
+echo "Probe 10/12: OAuth discovery (RFC 8414 + 9728)"
+AS_DOC=$(curl -sS -m 10 "$BASE_URL/.well-known/oauth-authorization-server" || true)
+PR_DOC=$(curl -sS -m 10 "$BASE_URL/.well-known/oauth-protected-resource" || true)
+AS_HAS_REG=$(printf '%s' "$AS_DOC" | jq -r 'has("registration_endpoint")' 2>/dev/null || echo "parse_error")
+AS_PKCE=$(printf '%s' "$AS_DOC" | jq -c '.code_challenge_methods_supported // empty' 2>/dev/null || echo "")
+AS_SCOPES=$(printf '%s' "$AS_DOC" | jq -c '.scopes_supported // empty' 2>/dev/null || echo "")
+PR_RES=$(printf '%s' "$PR_DOC" | jq -r '.resource // empty' 2>/dev/null || echo "")
+if [ "$AS_HAS_REG" = "false" ] \
+   && [ "$AS_PKCE" = '["S256"]' ] \
+   && printf '%s' "$AS_SCOPES" | grep -q 'mcp:invoke' \
+   && [ "$PR_RES" = "$BASE_URL" ]; then
+  pass "discovery: registration_endpoint omitted, S256-only, mcp:invoke present, resource matches"
+else
+  fail "discovery" "has_reg=$AS_HAS_REG pkce=$AS_PKCE scopes=$AS_SCOPES pr_resource=$PR_RES"
+fi
+
+# Probe 11: /oauth/token authorization_code path rejects an unknown code
+# with RFC 6749 §5.2 error shape (invalid_grant + error_description).
+# A fake hex code passes shape validation (form parse, required fields,
+# canonical resource) and reaches the Supabase lookup, which finds no row.
+# This proves the endpoint is wired AND the Supabase service-role query
+# succeeded (a misconfigured deploy would 503 oauth_misconfigured here).
+echo "Probe 11/12: /oauth/token rejects unknown authorization code"
+TOKEN_RES=$(curl -sS -m 10 -i -X POST "$BASE_URL/oauth/token" \
+  -H "content-type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code&code=probefake$(date +%s)&code_verifier=verifierverifierverifierverifierverifier&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback&resource=https%3A%2F%2Fmcp.verityskills.com&client_id=claude_desktop" \
+  || true)
+TOKEN_STATUS=$(printf '%s' "$TOKEN_RES" | head -1 | awk '{print $2}')
+TOKEN_BODY=$(printf '%s' "$TOKEN_RES" | awk 'BEGIN{b=0} /^\r?$/{b=1;next} b{print}')
+TOKEN_ERR=$(printf '%s' "$TOKEN_BODY" | jq -r '.error // empty' 2>/dev/null || echo "")
+if [ "$TOKEN_STATUS" = "400" ] && [ "$TOKEN_ERR" = "invalid_grant" ]; then
+  pass "/oauth/token unknown code: 400 + invalid_grant (Supabase query succeeded, no row)"
+else
+  fail "/oauth/token unknown code" "status=$TOKEN_STATUS error=$TOKEN_ERR body=${TOKEN_BODY:0:200}"
+fi
+
+# Probe 12: tools/call with fake vto_ Bearer rejects (auth.ts vto_ branch
+# resolves the bearer against mcp_oauth_tokens, finds no row, returns
+# oauth_token_invalid). Uses tools/call (not initialize, which is the
+# transport handshake and runs unauthenticated). Asserts the vto_ branch
+# is wired AND that the response carries the WWW-Authenticate header on
+# the 401 path per RFC 6750. Token-passthrough ban (parent spec line 387)
+# is enforced structurally upstream (no curl probe can verify it
+# end-to-end without intercepting the upstream fetch); the integration
+# test at tests/oauth-integration.test.ts:119 is the load-bearing pin.
+echo "Probe 12/12: /mcp tools/call rejects fake vto_ Bearer"
+call_body='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"morning-brief","arguments":{}}}'
+MCP_RES=$(curl -sS -m 10 -i -X POST "$BASE_URL/mcp" \
+  -H "content-type: application/json" \
+  -H "Authorization: Bearer vto_probefake$(date +%s)" \
+  -d "$call_body" || true)
+MCP_STATUS=$(printf '%s' "$MCP_RES" | head -1 | awk '{print $2}')
+# `|| true` tail on the grep pipeline: under set -euo pipefail a missing
+# WWW-Authenticate header would otherwise abort the script via grep's
+# non-zero exit, masking the actual probe failure path below.
+MCP_WWWAUTH=$(printf '%s' "$MCP_RES" | { grep -i '^www-authenticate:' || true; } | head -1 | tr -d '\r')
+MCP_BODY=$(printf '%s' "$MCP_RES" | awk 'BEGIN{b=0} /^\r?$/{b=1;next} b{print}')
+MCP_ERR_CODE=$(printf '%s' "$MCP_BODY" | jq -r '.error.data.code // empty' 2>/dev/null || echo "")
+if [ "$MCP_STATUS" = "401" ] && [ -n "$MCP_WWWAUTH" ]; then
+  pass "/mcp tools/call fake vto_: 401 + WWW-Authenticate per RFC 6750"
+elif [ -n "$MCP_ERR_CODE" ] && printf '%s' "$MCP_ERR_CODE" | grep -qiE 'oauth|token|unauthor'; then
+  pass "/mcp tools/call fake vto_: JSON-RPC error envelope ($MCP_ERR_CODE)"
+else
+  fail "/mcp tools/call fake vto_" "status=$MCP_STATUS www-auth=$MCP_WWWAUTH err_code=$MCP_ERR_CODE body=${MCP_BODY:0:200}"
+fi
+
+# ================================================================
+# VRT-165 transport probes (require VERITY_MCP_TEST_KEY)
+# ================================================================
+
+if [ -z "$TEST_KEY" ]; then
+  echo
+  echo "SKIP: probes 1-9 (transport matrix) require VERITY_MCP_TEST_KEY."
+  echo "      Export it locally to run them; CI without the secret skips cleanly."
+  echo "================================================================"
+  echo "Result: $PASS_COUNT passed, $FAIL_COUNT failed (9 transport probes skipped)"
+  if [ "$FAIL_COUNT" -gt 0 ]; then
+    exit 1
+  fi
+  exit 0
+fi
 
 # Helper: POST initialize through /mcp with an optional Accept header.
 # initialize has no side effects and runs in microseconds.

@@ -1,6 +1,26 @@
 # Cursor Directory + Cursor Desktop install
 
-[Cursor](https://cursor.com) ships native MCP support. Two listings to pursue: their public Directory (discovery) and a one-paste config snippet (install).
+[Cursor](https://cursor.com) ships native MCP support. Two listings to pursue: their public Directory (discovery) and a one-paste config snippet (install). Cursor also supports OAuth 2.1 install for end users who prefer a sign-in flow over pasting an API key.
+
+## OAuth via Cursor MCP settings (recommended for end users)
+
+Cursor's MCP install flow accepts OAuth 2.1 servers. In Cursor: Settings -> Cursor Settings -> MCP -> Add new MCP server. Pick the OAuth option and paste:
+
+| Field | Value |
+|---|---|
+| Server URL | `https://mcp.verityskills.com/mcp` |
+| Discovery URL | `https://mcp.verityskills.com/.well-known/oauth-authorization-server` |
+| Client ID | `cursor` |
+| Client Secret | leave empty |
+
+Cursor opens the consent screen at `https://verityskills.com/oauth/mcp/authorize` in your default browser. Sign in via the magic link delivered to your inbox. Approve the consent. Cursor receives the OAuth token and lists the six Verity tools.
+
+Cursor uses a loopback callback (`http://localhost:<port>/oauth/callback`) per RFC 8252 §7.3. The Worker accepts any localhost port at validation time (the `client_id=cursor` row in the pre-registered allowlist carries the sentinel `http://localhost:0/oauth/callback`).
+
+Notes:
+- The `client_id` value (`cursor`) is a fixed string from v1's pre-registered allowlist.
+- Tokens are short-lived (1 hour access, 30 day refresh, automatic rotation per RFC 6749).
+- Tools that gate on Pro or Fund tier still gate; OAuth grants the existing entitlement, it does not upgrade you.
 
 ## Cursor Directory submission
 
