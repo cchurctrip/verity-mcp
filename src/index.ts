@@ -171,8 +171,13 @@ const handler = {
     // point.
     if (req.method === 'GET' && url.pathname === '/authorize') {
       if (env.MCP_OAUTH_KILL_SWITCH === 'on') {
+        // RFC 6749 §5.2 error code. Matches the shape /oauth/token returns
+        // on the same switch so callers see one consistent error vocabulary.
         return jsonResponse(
-          { error: 'oauth_killed', error_description: 'OAuth is temporarily disabled.' },
+          {
+            error: 'temporarily_unavailable',
+            error_description: 'OAuth temporarily disabled by operator.',
+          },
           503,
           { 'Retry-After': '60' },
         );
