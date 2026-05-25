@@ -147,6 +147,48 @@ const handler = {
       return jsonResponse(buildProtectedResourceMetadata(env), 200);
     }
 
+    // GET /authorize: 302 redirect to the consent UI on the Verity Next.js
+    // origin, preserving every query param. The discovery doc
+    // (/.well-known/oauth-authorization-server) correctly advertises
+    // `authorization_endpoint: https://verityskills.com/oauth/mcp/authorize`,
+    // but real MCP clients (Claude Desktop confirmed 2026-05-25; Cursor +
+    // ChatGPT Desktop + Gemini CLI suspected on same pattern) construct
+    // the authorize URL as `<server_url_host>/authorize` instead of
+    // honoring the metadata. This same-host redirect closes the gap
+    // without restructuring the consent UI cross-host split. State,
+    // code_challenge, code_challenge_method, redirect_uri, response_type,
+    // scope, resource, and client_id all pass through untouched; the
+    // user's browser then lands on the canonical consent URL on
+    // verityskills.com where the magic-link sign-in flow + consent
+    // approval happens per Phase 2.
+    //
+    // Gated by MCP_OAUTH_KILL_SWITCH per parity with the discovery doc
+    // (which omits authorization_endpoint when on) and /oauth/token
+    // (which returns 503 oauth_killed when on). Without this guard the
+    // redirect would still send users to the consent UI, which would
+    // then hit a kill-switched /oauth/token and surface a confusing
+    // generic 503 instead of a clean Retry-After signal at the entry
+    // point.
+    if (req.method === 'GET' && url.pathname === '/authorize') {
+      if (env.MCP_OAUTH_KILL_SWITCH === 'on') {
+        // RFC 6749 §5.2 error code. Matches the shape /oauth/token returns
+        // on the same switch so callers see one consistent error vocabulary.
+        return jsonResponse(
+          {
+            error: 'temporarily_unavailable',
+            error_description: 'OAuth temporarily disabled by operator.',
+          },
+          503,
+          { 'Retry-After': '60' },
+        );
+      }
+      const consentUrl = new URL('https://verityskills.com/oauth/mcp/authorize');
+      url.searchParams.forEach((value, key) => {
+        consentUrl.searchParams.set(key, value);
+      });
+      return Response.redirect(consentUrl.toString(), 302);
+    }
+
     // /oauth/token (RFC 6749). authorization_code + refresh_token grants
     // with PKCE S256 + RFC 8707 resource indicator + audience binding.
     // Kill-switch returns 503 with Retry-After; misconfigured (no Supabase
