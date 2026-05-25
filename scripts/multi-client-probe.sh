@@ -113,7 +113,10 @@ MCP_RES=$(curl -sS -m 10 -i -X POST "$BASE_URL/mcp" \
   -H "Authorization: Bearer vto_probefake$(date +%s)" \
   -d "$call_body" || true)
 MCP_STATUS=$(printf '%s' "$MCP_RES" | head -1 | awk '{print $2}')
-MCP_WWWAUTH=$(printf '%s' "$MCP_RES" | grep -i '^www-authenticate:' | head -1 | tr -d '\r')
+# `|| true` tail on the grep pipeline: under set -euo pipefail a missing
+# WWW-Authenticate header would otherwise abort the script via grep's
+# non-zero exit, masking the actual probe failure path below.
+MCP_WWWAUTH=$(printf '%s' "$MCP_RES" | { grep -i '^www-authenticate:' || true; } | head -1 | tr -d '\r')
 MCP_BODY=$(printf '%s' "$MCP_RES" | awk 'BEGIN{b=0} /^\r?$/{b=1;next} b{print}')
 MCP_ERR_CODE=$(printf '%s' "$MCP_BODY" | jq -r '.error.data.code // empty' 2>/dev/null || echo "")
 if [ "$MCP_STATUS" = "401" ] && [ -n "$MCP_WWWAUTH" ]; then
