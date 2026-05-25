@@ -165,3 +165,62 @@ describe('Token passthrough regression (MCP 2025-06-18 non-negotiable)', () => {
     void UPSTREAM_ORIGIN; // silence unused-var lint warning
   });
 });
+
+describe('GET /authorize (cross-host consent UI redirect)', () => {
+  // Real MCP clients (Claude Desktop 2026-05-25 confirmed; others suspected)
+  // hardcode <server_url_host>/authorize instead of honoring the
+  // authorization_endpoint advertised in the discovery doc. The Worker
+  // redirects /authorize to https://verityskills.com/oauth/mcp/authorize
+  // preserving every query param so the client lands on the canonical
+  // consent UI without restructuring the cross-host split.
+
+  it('302 redirects to verityskills.com consent UI preserving every param', async () => {
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=RZys6oE0LEvKRJXsmG65TYF91dYChzd0E_mybWbB_WM' +
+      '&code_challenge_method=S256' +
+      '&state=WeReBY1vYwH-C2TGgFaqR2jEtRsRAPkeoOxUaQd8t64' +
+      '&scope=mcp%3Ainvoke' +
+      '&resource=https%3A%2F%2Fmcp.verityskills.com';
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location');
+    expect(location).not.toBeNull();
+    const dest = new URL(location!);
+    expect(dest.origin).toBe('https://verityskills.com');
+    expect(dest.pathname).toBe('/oauth/mcp/authorize');
+    expect(dest.searchParams.get('response_type')).toBe('code');
+    expect(dest.searchParams.get('client_id')).toBe('claude_desktop');
+    expect(dest.searchParams.get('redirect_uri')).toBe(
+      'https://claude.ai/api/mcp/auth_callback',
+    );
+    expect(dest.searchParams.get('code_challenge')).toBe(
+      'RZys6oE0LEvKRJXsmG65TYF91dYChzd0E_mybWbB_WM',
+    );
+    expect(dest.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(dest.searchParams.get('state')).toBe(
+      'WeReBY1vYwH-C2TGgFaqR2jEtRsRAPkeoOxUaQd8t64',
+    );
+    expect(dest.searchParams.get('scope')).toBe('mcp:invoke');
+    expect(dest.searchParams.get('resource')).toBe('https://mcp.verityskills.com');
+  });
+
+  it('302 redirects even with no query params (defensive; client sees the consent UI 400 instead of a 404 here)', async () => {
+    const res = await SELF.fetch('http://example.com/authorize', { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location');
+    expect(location).toBe('https://verityskills.com/oauth/mcp/authorize');
+  });
+
+  it('rejects non-GET methods (404 fall-through)', async () => {
+    const res = await SELF.fetch('http://example.com/authorize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: '',
+    });
+    expect(res.status).toBe(404);
+  });
+});
