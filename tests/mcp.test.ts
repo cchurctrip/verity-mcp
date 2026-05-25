@@ -227,6 +227,39 @@ describe('outcomeToResponse', () => {
     });
   });
 
+  it('forward attaches WWW-Authenticate on upstream 401 (RFC 6750 §3; lazy-OAuth trigger for Claude Desktop et al)', () => {
+    // Pre-fix: anonymous tools/call against an auth-required tool
+    // (coordination-heat / verity-scan / cross-check-alert / disinfo-alert)
+    // returned the upstream 401 verbatim with no WWW-Authenticate header.
+    // Without it, Claude Desktop saw the 401 but had no protocol-level
+    // signal to open the OAuth flow, so the connector silently stayed
+    // unauthenticated. Confirmed live 2026-05-25; this test pins the
+    // regression guard.
+    const body = { error: 'X-Verity-Key header required. Get your API key from your account dashboard.' };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 401, body, upstreamStatus: 401 };
+    const r = outcomeToResponse(outcome, id);
+    expect(r.status).toBe(401);
+    expect(r.headers).toEqual({
+      'WWW-Authenticate':
+        'Bearer realm="mcp.verityskills.com", resource_metadata="https://mcp.verityskills.com/.well-known/oauth-protected-resource"',
+    });
+    expect(r.body).toEqual({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify(body) }],
+        isError: true,
+      },
+    });
+  });
+
+  it('forward does NOT attach WWW-Authenticate on non-401 errors (402 trial cap, 5xx, etc.)', () => {
+    const outcome: ProxyOutcome = { kind: 'forward', status: 402, body: { code: 'TRIAL_CAP_REACHED' }, upstreamStatus: 402 };
+    const r = outcomeToResponse(outcome, id);
+    expect(r.status).toBe(402);
+    expect(r.headers).toBeUndefined();
+  });
+
   it('forward preserves 402 status AND sets isError: true on non-2xx upstream forwards', () => {
     const body = { code: 'TRIAL_CAP_REACHED', upgrade_url: 'https://verityskills.com/upgrade?return_to=mcp&via=cap' };
     const outcome: ProxyOutcome = { kind: 'forward', status: 402, body, upstreamStatus: 402 };
