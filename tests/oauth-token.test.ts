@@ -449,7 +449,7 @@ describe('handleOauthToken /oauth/token per-code rate limit (arch review R8 test
 });
 
 describe('handleOauthToken refresh_token grant', () => {
-  it('happy path: rotate refresh -> mint new pair, hard-delete the redeemed refresh', async () => {
+  it('happy path: rotate refresh -> mint new pair, soft-revoke the redeemed refresh (iter-5)', async () => {
     const oldRefresh = 'oldrefreshtoken';
     const refreshRow = {
       token_hash: await sha256Hex(oldRefresh),
@@ -467,7 +467,10 @@ describe('handleOauthToken refresh_token grant', () => {
     const { fetchImpl, calls } = makeFetchStub([
       // 1. SELECT refresh row
       { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?select=', status: 200, body: [refreshRow] },
-      // 2. CLAIM (DELETE with revoked_at=is.null filter) -- iter 4 atomic rotation
+      // 2. CLAIM (PATCH with revoked_at=is.null filter, sets revoked_at)
+      //    iter-5: switched from hard-DELETE to soft-revoke so a replay of
+      //    the rotated refresh lands at the revoked-row branch and fires
+      //    family revocation per RFC 6819 §5.2.2.3.
       { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?token_hash=eq.', status: 200, body: [refreshRow] },
       // 3. INSERT access token
       { matchUrl: '/rest/v1/mcp_oauth_tokens', status: 201, body: [{}] },
@@ -491,8 +494,75 @@ describe('handleOauthToken refresh_token grant', () => {
     const body = res.body as { access_token: string; refresh_token: string };
     expect(body.access_token.startsWith('vto_')).toBe(true);
     expect(body.refresh_token).not.toBe(oldRefresh);
-    // Hard-delete of the redeemed refresh fired
-    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('mcp_oauth_refresh_tokens?token_hash=eq.'))).toBe(true);
+    // Soft-revoke of the redeemed refresh fired via PATCH (iter-5).
+    const claimCall = calls.find(
+      (c) => c.method === 'PATCH' && c.url.includes('mcp_oauth_refresh_tokens?token_hash=eq.'),
+    );
+    expect(claimCall).toBeDefined();
+    expect(claimCall?.url).toContain('revoked_at=is.null');
+  });
+
+  it('iter-5 regression: after rotation, replay of the rotated refresh fires family revoke (RFC 6819 §5.2.2.3)', async () => {
+    // Scenario: refresh token A rotates to B. Attacker then presents A
+    // (which was redeemed). Pre-iter-5 the row was hard-deleted, so the
+    // lookup returned 0 rows -> 'not recognized' -> NO family revoke.
+    // Post-iter-5 the row stays in place with revoked_at set, so the
+    // lookup returns the row with revoked_at != null -> family revoke.
+    const refreshA = 'familychainA';
+    const installationX = '55555555-5555-5555-5555-555555555555';
+    const rotatedRow = {
+      token_hash: await sha256Hex(refreshA),
+      client_id: 'claude_desktop',
+      user_id: 'u',
+      scope: 'mcp:invoke',
+      aud_uri: CANONICAL_RESOURCE_URI,
+      installation_id: installationX,
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+      created_at: new Date().toISOString(),
+      last_used_at: null,
+      // Simulates post-rotation state: revoked_at is set by the iter-5
+      // soft-revoke; the row remains so replay-detection can find it.
+      revoked_at: new Date().toISOString(),
+    };
+
+    const { fetchImpl, calls } = makeFetchStub([
+      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens?select=', status: 200, body: [rotatedRow] },
+      // Family revoke pair: DELETE access tokens, PATCH refresh tokens.
+      { matchUrl: '/rest/v1/mcp_oauth_tokens', status: 200, body: [{}] },
+      { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens', status: 200, body: [{}] },
+    ]);
+
+    const res = await handleOauthToken(
+      tokenReq(
+        formBody({
+          grant_type: 'refresh_token',
+          refresh_token: refreshA,
+          resource: CANONICAL_RESOURCE_URI,
+          client_id: 'claude_desktop',
+        }),
+      ),
+      baseEnv,
+      fetchImpl,
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toBe('invalid_grant');
+
+    // The family-revoke cascade fires scoped to the installation_id of the
+    // replayed token: access tokens deleted AND refresh tokens revoked.
+    const accessDelete = calls.find(
+      (c) =>
+        c.method === 'DELETE' &&
+        c.url.includes('mcp_oauth_tokens?installation_id=eq.') &&
+        c.url.includes(installationX),
+    );
+    const refreshPatch = calls.find(
+      (c) =>
+        c.method === 'PATCH' &&
+        c.url.includes('mcp_oauth_refresh_tokens?installation_id=eq.') &&
+        c.url.includes(installationX),
+    );
+    expect(accessDelete).toBeDefined();
+    expect(refreshPatch).toBeDefined();
   });
 
   it('refresh CAS loser (concurrent rotation): claim returns 0 rows -> invalid_grant, no mint', async () => {

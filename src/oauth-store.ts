@@ -165,23 +165,34 @@ export async function deleteRefreshToken(
 }
 
 /**
- * Atomic claim-and-delete on a refresh-token row. Single-statement DELETE
- * scoped by token_hash AND revoked_at=is.null AND used_at-ish freshness.
- * Returns the rows removed so the caller can verify it won the race.
+ * Atomic claim-via-revoke on a refresh-token row. Single-statement UPDATE
+ * setting revoked_at, scoped by token_hash AND revoked_at=is.null. Returns
+ * the updated rows so the caller can verify it won the race.
  *
  * Two concurrent refresh-token grants presenting the same token can both
  * see the row as non-revoked in their snapshot SELECT; without an atomic
  * claim, both would proceed to mintTokenPair and emit two pairs against
- * one stolen refresh. PostgREST DELETE returns the deleted rows, giving
- * us a compare-and-claim via the filter. Loser sees 0 rows and aborts.
+ * one stolen refresh. PostgREST UPDATE with `Prefer: return=representation`
+ * returns the updated rows, giving us a compare-and-claim via the filter.
+ * Loser sees 0 rows and aborts.
+ *
+ * UPDATE instead of DELETE is the iter-5 fix for the refresh-family revoke
+ * gap: leaving the row in place (with revoked_at set) means a subsequent
+ * replay of the same token (an RFC 6819 §5.2.2.3 reuse-detection signal)
+ * lands at the revoked-row branch in handleRefreshTokenGrant, which fires
+ * `revokeInstallationFamily`. A hard-DELETE rotation would leave the
+ * replay returning "not recognized" with no family revoke. A periodic
+ * cleanup cron on revoked_at + age is a follow-up issue.
  */
 export async function claimRefreshTokenForRotation(
   db: SupabaseClient,
   tokenHash: string,
+  revokedAtIso: string,
 ): Promise<SupabaseResult<OauthRefreshTokenRow>> {
-  return db.remove<OauthRefreshTokenRow>(
+  return db.update<OauthRefreshTokenRow>(
     'mcp_oauth_refresh_tokens',
     `token_hash=eq.${encodeURIComponent(tokenHash)}&revoked_at=is.null`,
+    { revoked_at: revokedAtIso },
   );
 }
 

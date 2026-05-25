@@ -250,8 +250,15 @@ async function handleAuthorizationCodeGrant(
   // Defense in depth (spec line 26): if the code was already used, revoke
   // every token whose installation_id matches THIS code. The legitimate
   // client's tokens get torched too, surfacing the breach loudly.
+  // Awaited (iter-5: silent-failure review) so a partial-revoke lastError
+  // is logged before the response goes out. Adds a single DB round-trip
+  // to the unhappy path; correctness wins over latency on a replay.
   if (row.used_at !== null) {
-    void revokeInstallationFamily(db, row.installation_id, new Date().toISOString());
+    await logRevokeOutcome(
+      'authorization_code_replay',
+      row.installation_id,
+      await revokeInstallationFamily(db, row.installation_id, new Date().toISOString()),
+    );
     return errorResponse('invalid_grant', 'authorization code already used', 400);
   }
   if (new Date(row.expires_at).getTime() <= Date.now()) {
@@ -319,17 +326,26 @@ async function handleAuthorizationCodeGrant(
     return errorResponse('invalid_grant', 'authorization code already used', 400);
   }
 
+  // Normalize the audience binding to the canonical constant before minting.
+  // The stored row.resource_uri already passed isCanonicalResourceUri above,
+  // so it is functionally equivalent to CANONICAL_RESOURCE_URI; storing the
+  // constant verbatim closes the iter-4 Bugbot drift where the resource-
+  // server check at src/upstream.ts compares the stored aud_uri to the
+  // constant via canonical-form equivalence (now the strings always match
+  // byte-for-byte too).
   return mintTokenPair(db, {
     clientId: row.client_id,
     userId: row.user_id,
     scope: row.scope,
-    audUri: row.resource_uri,
+    audUri: CANONICAL_RESOURCE_URI,
     installationId: row.installation_id,
   });
 }
 
 /**
- * refresh_token grant: validate the refresh token, rotate it (hard-delete the
+ * refresh_token grant: validate the refresh token, rotate it (soft-delete by
+ * setting revoked_at on the presented row, mint a fresh access+refresh pair
+ * sharing the same
  * presented row, mint a fresh access+refresh pair sharing the same
  * installation_id). If the presented refresh token cannot be found, this MAY
  * be a replay attack on a previously-rotated family; revoke the whole family
@@ -387,8 +403,17 @@ async function handleRefreshTokenGrant(
 
   if (row.revoked_at !== null) {
     // The legitimate client may have rotated; an attacker presenting the old
-    // token would hit this row. Revoke the entire family per RFC 6819.
-    void revokeInstallationFamily(db, row.installation_id, new Date().toISOString());
+    // token would hit this row. Revoke the entire family per RFC 6819 §5.2.2.3.
+    // Awaited (iter-5: silent-failure review) so a partial-revoke lastError
+    // is logged before the response goes out. This is the load-bearing
+    // path for refresh-token reuse-detection; the iter-4 hard-delete
+    // rotation would have made this path unreachable (row would not exist),
+    // so the iter-5 soft-delete claim is the structural fix.
+    await logRevokeOutcome(
+      'refresh_token_replay',
+      row.installation_id,
+      await revokeInstallationFamily(db, row.installation_id, new Date().toISOString()),
+    );
     return errorResponse('invalid_grant', 'refresh token revoked', 400);
   }
   if (new Date(row.expires_at).getTime() <= Date.now()) {
@@ -406,37 +431,54 @@ async function handleRefreshTokenGrant(
     return errorResponse('invalid_target', 'stored refresh aud_uri is not canonical', 400);
   }
 
-  // Atomic claim-and-delete: the DELETE filters on revoked_at=is.null at
+  // Atomic claim-via-revoke: the UPDATE filters on revoked_at=is.null at
   // the SQL layer, so two concurrent refresh-token grants presenting the
-  // same token can only have ONE see a 1-row delete. The loser sees 0
+  // same token can only have ONE see a 1-row update. The loser sees 0
   // rows and returns invalid_grant; only one pair gets minted per claim.
-  // This is the refresh-side analog of markCodeUsedIfUnused; without it,
-  // both isolates would mint a pair against one refresh row (Bugbot
-  // iter-3 finding "Refresh grant allows concurrent double mint").
+  // This is the refresh-side analog of markCodeUsedIfUnused.
   //
-  // Trade-off vs. the prior mint-then-delete ordering: if mint fails
-  // AFTER the claim succeeds, the refresh is consumed and the client
-  // hits the family-revoke path on retry. RFC 6819 §5.2.2.3 documents
-  // the rare false-positive boot rate; arch review RISK 6 calls it
-  // <1% acceptable for v1. The atomic-claim approach is preferred
-  // because the concurrent-double-mint class is a stronger attack
-  // (single leaked token issues N pairs across N concurrent requests)
-  // than the network-drop class (single false-positive boot per drop).
-  const claim = await claimRefreshTokenForRotation(db, refreshHash);
+  // iter-5: switched from hard-DELETE to soft-revoke (UPDATE revoked_at).
+  // The hard-delete approach left replays of a redeemed token returning
+  // "not recognized" without triggering family revocation, because the row
+  // was already gone. Soft-revoke keeps the row with revoked_at set, so
+  // an attacker presenting the previously-redeemed token lands at the
+  // revoked-row branch above which fires `revokeInstallationFamily` per
+  // RFC 6819 §5.2.2.3. A periodic cleanup cron on (revoked_at, age) is a
+  // follow-up.
+  //
+  // Trade-off vs. the prior mint-then-delete ordering still applies: if
+  // mint fails AFTER the claim succeeds, the refresh is consumed and the
+  // client hits the family-revoke path on retry. RFC 6819 §5.2.2.3
+  // documents the rare false-positive boot rate; arch review RISK 6
+  // calls it <1% acceptable for v1. The atomic-claim approach is
+  // preferred because the concurrent-double-mint class is a stronger
+  // attack (single leaked token issues N pairs across N concurrent
+  // requests) than the network-drop class (single false-positive boot
+  // per drop).
+  const claim = await claimRefreshTokenForRotation(
+    db,
+    refreshHash,
+    new Date().toISOString(),
+  );
   if (claim.kind !== 'ok') {
     return errorResponse('server_error', `refresh claim failed: ${describe(claim)}`, 500);
   }
   if (claim.rows.length === 0) {
     // Race loser, OR the row was revoked between our SELECT and our
-    // DELETE. Either way, the legitimate path mints once; we abort.
+    // claim UPDATE. Either way, the legitimate path mints once; we abort.
     return errorResponse('invalid_grant', 'refresh token already consumed or revoked', 400);
   }
 
+  // Normalize the audience binding to the canonical constant (iter-5):
+  // row.aud_uri already passed isCanonicalResourceUri above, so storing
+  // the constant keeps the resource-server check at src/upstream.ts a
+  // byte-for-byte equality even when the original stored value was a
+  // canonical equivalent (mixed-case host, explicit default port).
   return mintTokenPair(db, {
     clientId: row.client_id,
     userId: row.user_id,
     scope: row.scope,
-    audUri: row.aud_uri,
+    audUri: CANONICAL_RESOURCE_URI,
     installationId: row.installation_id,
   });
 }
@@ -522,4 +564,27 @@ function describe(result: { kind: string } & Record<string, unknown>): string {
     return String(result['cause']);
   }
   return result.kind;
+}
+
+/**
+ * Emit a structured log line when a family revoke completes. Surfaces
+ * partial failures (one of the two table writes returned an error) so
+ * on-call sees the cascade did not fully fire on an active replay attack.
+ * No-op on clean revokes; the per-table counts go to the next observability
+ * iteration if needed. iter-5 silent-failure-review fix.
+ */
+async function logRevokeOutcome(
+  cause: 'authorization_code_replay' | 'refresh_token_replay',
+  installationId: string,
+  outcome: { accessTokensDeleted: number; refreshTokensRevoked: number; lastError?: string },
+): Promise<void> {
+  if (outcome.lastError !== undefined) {
+    console.error('[oauth-token] family revoke partial failure', {
+      cause,
+      installation_id: installationId,
+      access_tokens_deleted: outcome.accessTokensDeleted,
+      refresh_tokens_revoked: outcome.refreshTokensRevoked,
+      last_error: outcome.lastError,
+    });
+  }
 }
