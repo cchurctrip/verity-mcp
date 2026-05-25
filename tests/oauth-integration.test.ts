@@ -281,4 +281,62 @@ describe('GET /authorize (cross-host consent UI redirect)', () => {
     expect(dest.searchParams.get('scope')).toBe('mcp:something-else');
     expect(dest.searchParams.get('resource')).toBe('https://someother.example.com');
   });
+
+  it('canonicalizes trailing-slash resource to the literal constant (Claude Desktop 2026-05-25 compat)', async () => {
+    // Exact form Claude Desktop emits: trailing slash on the resource.
+    // Phase 2 consent UI does strict-equality; pre-fix it returned the
+    // "Connection blocked / resource must be ..." error page. Post-fix
+    // the Worker normalizes to the canonical no-slash form before the
+    // 302 so the consent UI's strict match succeeds.
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=ZzaTcJkfAEJl6abc' +
+      '&code_challenge_method=S256' +
+      '&state=teststate' +
+      '&scope=mcp%3Ainvoke' +
+      '&resource=https%3A%2F%2Fmcp.verityskills.com%2F'; // trailing slash
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const dest = new URL(res.headers.get('Location')!);
+    expect(dest.searchParams.get('resource')).toBe('https://mcp.verityskills.com');
+  });
+
+  it('canonicalizes mixed-case host + explicit-default port to the literal constant', async () => {
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=ZzaTcJkfAEJl6abc' +
+      '&code_challenge_method=S256' +
+      '&state=teststate' +
+      '&scope=mcp%3Ainvoke' +
+      '&resource=https%3A%2F%2FMCP.VERITYSKILLS.COM%3A443';
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const dest = new URL(res.headers.get('Location')!);
+    expect(dest.searchParams.get('resource')).toBe('https://mcp.verityskills.com');
+  });
+
+  it('non-canonical-equivalent resource passes through unchanged (deeper path, different host)', async () => {
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=ZzaTcJkfAEJl6abc' +
+      '&code_challenge_method=S256' +
+      '&state=teststate' +
+      '&scope=mcp%3Ainvoke' +
+      '&resource=https%3A%2F%2Fmcp.verityskills.com%2Fextra-path';
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const dest = new URL(res.headers.get('Location')!);
+    expect(dest.searchParams.get('resource')).toBe(
+      'https://mcp.verityskills.com/extra-path',
+    );
+  });
 });
