@@ -186,6 +186,28 @@ const handler = {
       url.searchParams.forEach((value, key) => {
         consentUrl.searchParams.set(key, value);
       });
+      // Default the v1 allowlisted values for params some MCP clients omit.
+      // Claude Desktop confirmed 2026-05-25: emits the authorize URL with
+      // response_type + client_id + redirect_uri + code_challenge + state
+      // but NO scope (and sometimes no resource or no
+      // code_challenge_method). The Phase 2 consent UI is strict and
+      // rejects with "Missing scope" otherwise. Since v1's pre-registered
+      // allowlist permits exactly one scope (`mcp:invoke`), one resource
+      // (`https://mcp.verityskills.com`), and one PKCE method (`S256`),
+      // defaulting at the entry point is equivalent to enforcing the
+      // allowlist downstream and saves a manual reconfig step on the
+      // client side. The consent UI re-validates either way, so a
+      // tampered request reaching the consent UI directly still gets
+      // the same enforcement. Client-provided values win (no overwrite).
+      if (!consentUrl.searchParams.has('scope')) {
+        consentUrl.searchParams.set('scope', 'mcp:invoke');
+      }
+      if (!consentUrl.searchParams.has('resource')) {
+        consentUrl.searchParams.set('resource', 'https://mcp.verityskills.com');
+      }
+      if (!consentUrl.searchParams.has('code_challenge_method')) {
+        consentUrl.searchParams.set('code_challenge_method', 'S256');
+      }
       return Response.redirect(consentUrl.toString(), 302);
     }
 

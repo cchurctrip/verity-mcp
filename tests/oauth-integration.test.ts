@@ -211,8 +211,16 @@ describe('GET /authorize (cross-host consent UI redirect)', () => {
   it('302 redirects even with no query params (defensive; client sees the consent UI 400 instead of a 404 here)', async () => {
     const res = await SELF.fetch('http://example.com/authorize', { redirect: 'manual' });
     expect(res.status).toBe(302);
-    const location = res.headers.get('Location');
-    expect(location).toBe('https://verityskills.com/oauth/mcp/authorize');
+    const dest = new URL(res.headers.get('Location')!);
+    // The Worker injects the v1 allowlisted defaults (scope + resource +
+    // code_challenge_method) even on an empty query so the consent UI sees
+    // a partially-complete request (still missing client_id, redirect_uri,
+    // state, code_challenge; consent UI surfaces the precise "Missing X"
+    // error for each).
+    expect(`${dest.origin}${dest.pathname}`).toBe(
+      'https://verityskills.com/oauth/mcp/authorize',
+    );
+    expect(dest.searchParams.get('scope')).toBe('mcp:invoke');
   });
 
   it('rejects non-GET methods (404 fall-through)', async () => {
@@ -222,5 +230,55 @@ describe('GET /authorize (cross-host consent UI redirect)', () => {
       body: '',
     });
     expect(res.status).toBe(404);
+  });
+
+  it('defaults scope=mcp:invoke when the client omits it (Claude Desktop 2026-05-25 compat)', async () => {
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=ZzaTcJkfAEJl6abc' +
+      '&code_challenge_method=S256' +
+      '&state=teststate' +
+      '&resource=https%3A%2F%2Fmcp.verityskills.com';
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const dest = new URL(res.headers.get('Location')!);
+    expect(dest.searchParams.get('scope')).toBe('mcp:invoke');
+  });
+
+  it('defaults resource + code_challenge_method when omitted (defense in depth)', async () => {
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=ZzaTcJkfAEJl6abc' +
+      '&state=teststate';
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const dest = new URL(res.headers.get('Location')!);
+    expect(dest.searchParams.get('scope')).toBe('mcp:invoke');
+    expect(dest.searchParams.get('resource')).toBe('https://mcp.verityskills.com');
+    expect(dest.searchParams.get('code_challenge_method')).toBe('S256');
+  });
+
+  it('client-provided scope wins (defaults do not overwrite explicit values)', async () => {
+    const params =
+      'response_type=code&client_id=claude_desktop' +
+      '&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback' +
+      '&code_challenge=ZzaTcJkfAEJl6abc' +
+      '&code_challenge_method=S256' +
+      '&state=teststate' +
+      '&scope=mcp%3Asomething-else' +
+      '&resource=https%3A%2F%2Fsomeother.example.com';
+    const res = await SELF.fetch(`http://example.com/authorize?${params}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    const dest = new URL(res.headers.get('Location')!);
+    expect(dest.searchParams.get('scope')).toBe('mcp:something-else');
+    expect(dest.searchParams.get('resource')).toBe('https://someother.example.com');
   });
 });
