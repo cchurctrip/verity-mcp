@@ -161,7 +161,22 @@ const handler = {
     // user's browser then lands on the canonical consent URL on
     // verityskills.com where the magic-link sign-in flow + consent
     // approval happens per Phase 2.
+    //
+    // Gated by MCP_OAUTH_KILL_SWITCH per parity with the discovery doc
+    // (which omits authorization_endpoint when on) and /oauth/token
+    // (which returns 503 oauth_killed when on). Without this guard the
+    // redirect would still send users to the consent UI, which would
+    // then hit a kill-switched /oauth/token and surface a confusing
+    // generic 503 instead of a clean Retry-After signal at the entry
+    // point.
     if (req.method === 'GET' && url.pathname === '/authorize') {
+      if (env.MCP_OAUTH_KILL_SWITCH === 'on') {
+        return jsonResponse(
+          { error: 'oauth_killed', error_description: 'OAuth is temporarily disabled.' },
+          503,
+          { 'Retry-After': '60' },
+        );
+      }
       const consentUrl = new URL('https://verityskills.com/oauth/mcp/authorize');
       url.searchParams.forEach((value, key) => {
         consentUrl.searchParams.set(key, value);
