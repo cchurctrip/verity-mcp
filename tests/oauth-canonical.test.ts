@@ -6,7 +6,11 @@
 
 import { describe, expect, it } from 'vitest';
 import * as fc from 'fast-check';
-import { CANONICAL_RESOURCE_URI, isCanonicalResourceUri } from '../src/oauth-canonical';
+import {
+  CANONICAL_RESOURCE_URI,
+  isCanonicalEquivalentResource,
+  isCanonicalResourceUri,
+} from '../src/oauth-canonical';
 
 describe('isCanonicalResourceUri positive', () => {
   it('accepts the canonical bare-origin URI', () => {
@@ -89,5 +93,68 @@ describe('isCanonicalResourceUri negative', () => {
       ),
       { numRuns: 100 },
     );
+  });
+});
+
+describe('isCanonicalEquivalentResource (#25 part 7: SDK trailing-slash form)', () => {
+  it('accepts the canonical bare-origin URI', () => {
+    expect(isCanonicalEquivalentResource(CANONICAL_RESOURCE_URI)).toBe(true);
+  });
+
+  it('accepts the trailing-slash form (the variant SDK clients emit)', () => {
+    // `new URL("https://mcp.verityskills.com").href` returns
+    // `"https://mcp.verityskills.com/"` per WHATWG URL §4.5. mcp-remote
+    // and the official @modelcontextprotocol/sdk both emit `.href`
+    // when constructing the `resource` param on /authorize and
+    // /oauth/token, so we must accept this form at both entry points.
+    expect(isCanonicalEquivalentResource('https://mcp.verityskills.com/')).toBe(true);
+  });
+
+  it('accepts mixed-case host', () => {
+    expect(isCanonicalEquivalentResource('https://MCP.VerityskiLLs.com')).toBe(true);
+    expect(isCanonicalEquivalentResource('https://MCP.VerityskiLLs.com/')).toBe(true);
+  });
+
+  it('accepts explicit default port 443', () => {
+    expect(isCanonicalEquivalentResource('https://mcp.verityskills.com:443')).toBe(true);
+  });
+
+  it('rejects empty / null / undefined', () => {
+    expect(isCanonicalEquivalentResource('')).toBe(false);
+    expect(isCanonicalEquivalentResource(null)).toBe(false);
+    expect(isCanonicalEquivalentResource(undefined)).toBe(false);
+  });
+
+  it('rejects a deeper path beyond bare slash', () => {
+    expect(isCanonicalEquivalentResource('https://mcp.verityskills.com/oauth')).toBe(false);
+    expect(isCanonicalEquivalentResource('https://mcp.verityskills.com/mcp')).toBe(false);
+  });
+
+  it('rejects a query string', () => {
+    expect(isCanonicalEquivalentResource('https://mcp.verityskills.com?x=1')).toBe(false);
+  });
+
+  it('rejects a fragment', () => {
+    expect(isCanonicalEquivalentResource('https://mcp.verityskills.com#frag')).toBe(false);
+  });
+
+  it('rejects http (wrong scheme)', () => {
+    expect(isCanonicalEquivalentResource('http://mcp.verityskills.com')).toBe(false);
+    expect(isCanonicalEquivalentResource('http://mcp.verityskills.com/')).toBe(false);
+  });
+
+  it('rejects a different host', () => {
+    expect(isCanonicalEquivalentResource('https://api.verityskills.com')).toBe(false);
+    expect(isCanonicalEquivalentResource('https://evil.example.com/')).toBe(false);
+  });
+
+  it('rejects userinfo', () => {
+    expect(isCanonicalEquivalentResource('https://user:pass@mcp.verityskills.com')).toBe(false);
+    expect(isCanonicalEquivalentResource('https://user@mcp.verityskills.com/')).toBe(false);
+  });
+
+  it('rejects a non-URL string', () => {
+    expect(isCanonicalEquivalentResource('not a uri')).toBe(false);
+    expect(isCanonicalEquivalentResource('mcp.verityskills.com')).toBe(false);
   });
 });

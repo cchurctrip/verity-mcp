@@ -38,7 +38,7 @@ import {
   buildProtectedResourceMetadata,
   type OauthDiscoveryEnv,
 } from './oauth-discovery';
-import { CANONICAL_RESOURCE_URI } from './oauth-canonical';
+import { CANONICAL_RESOURCE_URI, isCanonicalEquivalentResource } from './oauth-canonical';
 import { handleOauthRegister, type OauthRegisterEnv } from './oauth-register';
 import { handleOauthToken, type OauthTokenEnv } from './oauth-token';
 import {
@@ -263,7 +263,7 @@ const handler = {
       // that fail this loose match pass through and the consent UI
       // rejects with the same `resource must be "..."` message.
       const requestedResource = consentUrl.searchParams.get('resource');
-      if (requestedResource !== null && isCanonicalEquivalent(requestedResource)) {
+      if (requestedResource !== null && isCanonicalEquivalentResource(requestedResource)) {
         consentUrl.searchParams.set('resource', CANONICAL_RESOURCE_URI);
       }
       return Response.redirect(consentUrl.toString(), 302);
@@ -540,33 +540,6 @@ const handler = {
 // is structurally compatible with the SDK's `(env: Env) =>
 // CloudflareOptions | undefined` shape (Env extends ObservabilityEnv).
 export default Sentry.withSentry<Env>(buildSentryConfig, handler);
-
-/**
- * Loose canonical-equivalence check for the resource param on /authorize.
- * Returns true if the candidate URI parses as https on the canonical Verity
- * MCP host (case-insensitive) with no path beyond a bare slash, no query,
- * no fragment, no userinfo. Used to normalize forms a real OAuth client
- * emits (notably the trailing-slash variant Claude Desktop sends) before
- * the 302 to the consent UI's strict-equality check. NOT a security gate
- * by itself; the consent UI + tools/call audience check both re-validate
- * against CANONICAL_RESOURCE_URI downstream.
- */
-function isCanonicalEquivalent(raw: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'https:') return false;
-  if (parsed.host.toLowerCase() !== 'mcp.verityskills.com') return false;
-  if (parsed.username !== '' || parsed.password !== '') return false;
-  if (parsed.search !== '') return false;
-  if (parsed.hash !== '') return false;
-  // Accept '' (no path) or '/' (bare slash). Reject any deeper path.
-  if (parsed.pathname !== '' && parsed.pathname !== '/') return false;
-  return true;
-}
 
 function jsonResponse(
   body: unknown,

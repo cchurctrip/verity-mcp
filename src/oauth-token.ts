@@ -34,7 +34,11 @@
 // the upstream skill routes. NEVER `x-verity-key: vto_*`.
 
 import { randomTokenSuffix, sha256Hex, verifyPkceS256 } from './oauth-crypto';
-import { CANONICAL_RESOURCE_URI, isCanonicalResourceUri } from './oauth-canonical';
+import {
+  CANONICAL_RESOURCE_URI,
+  isCanonicalEquivalentResource,
+  isCanonicalResourceUri,
+} from './oauth-canonical';
 import { noteRequestForCode } from './oauth-rate-limit';
 import {
   OAUTH_MISCONFIGURED_BODY,
@@ -220,9 +224,15 @@ async function handleAuthorizationCodeGrant(
   }
 
   // Audience-canonical-form check on the request resource. Mismatch is
-  // invalid_target per RFC 8707 §3. Even though we re-check against the
-  // stored row below, fail fast here so the error is unambiguous.
-  if (!isCanonicalResourceUri(resource)) {
+  // invalid_target per RFC 8707 §3. We accept any canonical-equivalent
+  // form here (notably the trailing-slash variant the WHATWG URL parser
+  // hands back to spec-conformant clients like mcp-remote, the official
+  // @modelcontextprotocol/sdk, and Claude Desktop) and normalize to the
+  // canonical constant for downstream byte-equality compares. The
+  // stored row.resource_uri is re-checked with the STRICT
+  // isCanonicalResourceUri below to keep audience binding tight at the
+  // storage boundary.
+  if (!isCanonicalEquivalentResource(resource)) {
     return errorResponse(
       'invalid_target',
       `resource must be the canonical URI ${CANONICAL_RESOURCE_URI}`,
@@ -368,7 +378,12 @@ async function handleRefreshTokenGrant(
   if (typeof resource !== 'string' || resource.length === 0) {
     return errorResponse('invalid_request', 'resource is required (RFC 8707)', 400);
   }
-  if (!isCanonicalResourceUri(resource)) {
+  // Loose canonical-equivalence (see authorization_code grant above for the
+  // full rationale). Refresh-token grants need the same allowance because
+  // mcp-remote sends `resource=https://mcp.verityskills.com/` on the
+  // refresh request too, and rejecting here would silently boot every
+  // session the first time it tries to refresh.
+  if (!isCanonicalEquivalentResource(resource)) {
     return errorResponse(
       'invalid_target',
       `resource must be the canonical URI ${CANONICAL_RESOURCE_URI}`,

@@ -77,6 +77,62 @@ export function isCanonicalResourceUri(candidate: string | undefined | null): bo
 }
 
 /**
+ * Loose canonical-equivalence check for the `resource` param at the entry
+ * points where real MCP clients pass an RFC 3986 §6.2.3 path-equivalent form
+ * (bare slash) that the WHATWG URL parser hands back from
+ * `new URL("https://mcp.verityskills.com").href`. Used at GET /authorize
+ * and POST /oauth/token to accept both `https://mcp.verityskills.com`
+ * (canonical) and `https://mcp.verityskills.com/` (SDK-emitted) before
+ * normalizing to the canonical constant for downstream storage and audience
+ * binding.
+ *
+ * Confirmed senders of the trailing-slash form:
+ *   - Claude Desktop (2026-05-25)
+ *   - mcp-remote / official @modelcontextprotocol/sdk (2026-05-26): always
+ *     emits `resource.href` which the WHATWG parser canonicalizes with a
+ *     trailing slash on origin-only URLs.
+ *
+ * Accepts (returns true):
+ *   - 'https://mcp.verityskills.com'         (canonical)
+ *   - 'https://mcp.verityskills.com/'        (bare slash, SDK form)
+ *   - 'https://MCP.VerityskiLLs.com'         (host case-folds)
+ *   - 'https://mcp.verityskills.com:443'     (explicit default port)
+ *
+ * Rejects (returns false):
+ *   - 'https://mcp.verityskills.com/oauth'   (deeper path)
+ *   - 'https://mcp.verityskills.com?x=1'     (query)
+ *   - 'https://mcp.verityskills.com#frag'    (fragment)
+ *   - 'http://mcp.verityskills.com'          (wrong scheme)
+ *   - 'https://user:pass@mcp.verityskills.com' (userinfo)
+ *   - 'not a uri'                            (unparseable)
+ *
+ * NOT a security gate by itself: stored row.resource_uri / row.aud_uri are
+ * always re-checked with the strict isCanonicalResourceUri before issuing
+ * or accepting tokens, and storage is normalized to CANONICAL_RESOURCE_URI
+ * verbatim so byte-for-byte string equality holds end-to-end.
+ */
+export function isCanonicalEquivalentResource(candidate: string | undefined | null): boolean {
+  if (typeof candidate !== 'string' || candidate.length === 0) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.host.toLowerCase() !== 'mcp.verityskills.com') return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
+  if (parsed.search !== '') return false;
+  if (parsed.hash !== '') return false;
+  // Accept '' (no path) or '/' (bare slash). Reject any deeper path. The
+  // WHATWG URL parser always normalizes pathname to '/' even when the input
+  // has no slash, so we check the raw string for the slash boundary too:
+  // the canonical form ends at the authority.
+  if (parsed.pathname !== '' && parsed.pathname !== '/') return false;
+  return true;
+}
+
+/**
  * Returns the index of the first path/query/fragment separator (`/`, `?`, `#`)
  * after the scheme-authority block. Returns -1 if the input ends at the
  * authority (canonical form).
