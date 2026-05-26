@@ -54,7 +54,21 @@ enabled = true
 #                                  validation of vto_* tokens at /mcp returns
 #                                  503 OAUTH_KILLED). vtk_* path stays live.
 #                                  Default off; owner toggleable without redeploy.
+#   WORKER_SHARED_SECRET          shared secret with the upstream Verity Next.js
+#                                  app at verityskills.com. Forwarded on every
+#                                  OAuth-path upstream call as the
+#                                  x-worker-shared-secret header alongside
+#                                  x-verity-user-id. The upstream rejects
+#                                  x-verity-user-id without a matching secret
+#                                  to prevent anyone from forging the user id.
+#                                  Must equal the WORKER_SHARED_SECRET env var
+#                                  on Vercel (verity repo). Generate with
+#                                  `openssl rand -hex 32`; rotate by setting
+#                                  both sides in the same window. Absence at
+#                                  request time returns oauth_misconfigured on
+#                                  the OAuth path; vtk_ + anonymous paths are
+#                                  unaffected.
 #
-# None of the three are set here; all three live as Wrangler secrets per env.
+# None of the four are set here; all four live as Wrangler secrets per env.
 # Section kept as documentation only so a future reviewer can grep "OAuth"
 # in this file and find the wiring.

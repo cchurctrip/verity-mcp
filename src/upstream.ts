@@ -43,6 +43,16 @@ import { findAccessTokenByHash } from './oauth-store';
 export interface ProxyEnv extends SupabaseEnv {
   MCP_TOOLS_DISABLED?: string;
   MCP_OAUTH_KILL_SWITCH?: string;
+  // VRT-166: shared secret between this Worker and the upstream Verity
+  // Next.js app. Forwarded on every OAuth-path upstream call alongside
+  // x-verity-user-id, so the upstream can prove the headers came from
+  // our Worker (which has already validated the vto_ token) and not
+  // from a client forging the user id. Must be the SAME string as the
+  // WORKER_SHARED_SECRET env var on Vercel (verity repo). Owner-set via
+  // `wrangler secret put WORKER_SHARED_SECRET`. Absence at request time
+  // returns oauth_token_invalid:'oauth_misconfigured' on the OAuth path;
+  // vtk_* and anonymous paths are unaffected.
+  WORKER_SHARED_SECRET?: string;
 }
 
 const UPSTREAM_BASE = 'https://verityskills.com';
@@ -138,14 +148,28 @@ export function buildUpstreamHeaders(auth: BearerResult, requestId: string): Hea
 
 /**
  * Headers for the OAuth-token forward path: x-verity-user-id with the
- * resolved UUID, x-request-id for tracing, no x-verity-key, no raw token
- * anywhere. The vto_* token NEVER appears in the returned Headers.
+ * resolved UUID, x-worker-shared-secret with the pre-shared secret, and
+ * x-request-id for tracing. No x-verity-key, no raw token anywhere. The
+ * vto_* token NEVER appears in the returned Headers.
+ *
+ * The shared secret is REQUIRED so the upstream Verity API can prove the
+ * x-verity-user-id header came from this Worker. Without the secret, an
+ * attacker could send any user id directly to verityskills.com/api/skills/*
+ * and impersonate that user; the Worker's whole OAuth validation chain
+ * would be bypassed. Caller (proxyToolCall) MUST guarantee the secret is
+ * non-empty before invoking this function; an empty secret should
+ * fail-fast at the call site, not produce a malformed header.
  */
-export function buildUpstreamHeadersForOauth(userId: string, requestId: string): Headers {
+export function buildUpstreamHeadersForOauth(
+  userId: string,
+  requestId: string,
+  sharedSecret: string,
+): Headers {
   const headers = new Headers();
   headers.set('content-type', 'application/json');
   headers.set('x-request-id', requestId);
   headers.set('x-verity-user-id', userId);
+  headers.set('x-worker-shared-secret', sharedSecret);
   return headers;
 }
 
@@ -270,6 +294,18 @@ export async function proxyToolCall(
     if (env.MCP_OAUTH_KILL_SWITCH === 'on') {
       return { kind: 'oauth_token_invalid', reason: 'oauth_killed' };
     }
+    // VRT-166: WORKER_SHARED_SECRET MUST be configured before we can
+    // forward upstream on the OAuth path. The upstream rejects
+    // x-verity-user-id without a matching x-worker-shared-secret to
+    // prevent anyone from impersonating any user by setting the header.
+    // Treat absence as a misconfiguration: 'oauth_misconfigured' is the
+    // existing fail-closed reason for the OAuth path (mirrors the
+    // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY check below). vtk_ and
+    // anonymous callers are unaffected because they never reach this
+    // branch.
+    if (!env.WORKER_SHARED_SECRET || env.WORKER_SHARED_SECRET.length === 0) {
+      return { kind: 'oauth_token_invalid', reason: 'oauth_misconfigured' };
+    }
     const db = buildSupabaseClient(env, fetchImpl);
     if (db === null) {
       return { kind: 'oauth_token_invalid', reason: 'oauth_misconfigured' };
@@ -307,7 +343,14 @@ export async function proxyToolCall(
   // is needed here: the header-build path is uniform.
   const headers =
     resolvedOauthUserId !== null
-      ? buildUpstreamHeadersForOauth(resolvedOauthUserId, requestId)
+      ? // SAFETY: the WORKER_SHARED_SECRET check at the top of the
+        // OAuth branch already returned oauth_misconfigured if the env
+        // var was missing or empty. By construction, resolvedOauthUserId
+        // is only non-null after that check passed, so the non-null
+        // assertion here is sound. Pinned by the upstream.test.ts case
+        // "OAuth path returns oauth_misconfigured when WORKER_SHARED_SECRET
+        // is missing".
+        buildUpstreamHeadersForOauth(resolvedOauthUserId, requestId, env.WORKER_SHARED_SECRET!)
       : buildUpstreamHeaders(auth, requestId);
   const url = `${UPSTREAM_BASE}${TOOL_ROUTES[toolName]}`;
 
