@@ -77,10 +77,16 @@ describe('Unknown path', () => {
 });
 
 describe('POST /mcp dispatch (formerly 501 stub)', () => {
+  // Issue #25: every authenticated test below carries a `Bearer vtk_test`
+  // header. Without it the eager-OAuth challenge in src/index.ts short-
+  // circuits with 401 + WWW-Authenticate before handleMcpRequest runs.
+  // The auth-absent challenge has its own dedicated describe block below.
+  const AUTHED = { 'content-type': 'application/json', authorization: 'Bearer vtk_test' };
+
   it('initialize returns the byte-identical capability advertisement', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: AUTHED,
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
     expect(res.status).toBe(200);
@@ -99,7 +105,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
   it('tools/list returns the 6 advertised tools', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: AUTHED,
       body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
     });
     expect(res.status).toBe(200);
@@ -118,7 +124,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
   it('unparseable body returns -32700 with HTTP 200', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: AUTHED,
       body: '{not-json',
     });
     expect(res.status).toBe(200);
@@ -129,7 +135,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
   it('unknown method returns -32601', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: AUTHED,
       body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'mystery/probe', params: {} }),
     });
     expect(res.status).toBe(200);
@@ -144,7 +150,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
     // index.ts logic is the source of truth.
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: AUTHED,
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
     // Default vars in wrangler.toml do not set MCP_KILL_SWITCH, so a positive
@@ -152,5 +158,67 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
     // happy-path operates instead; the kill-switch check sits at the top of
     // fetch() and was unit-tested in PR #1.
     expect(res.status).toBe(200);
+  });
+});
+
+describe('POST /mcp eager-OAuth challenge (issue #25)', () => {
+  // RFC 6750 + RFC 9728. Any POST /mcp with no Authorization header gets
+  // a 401 + WWW-Authenticate at the worker edge so MCP clients (Cursor,
+  // ChatGPT Desktop, Claude Desktop, Gemini CLI) auto-discover the OAuth
+  // server and trigger the consent flow. Previously initialize and
+  // tools/list were served unauthenticated, which broke Cursor's
+  // mcp.json HTTP install path: Cursor stayed in auth=unknown and never
+  // surfaced tools to the agent.
+  const expectedWwwAuth =
+    'Bearer realm="mcp.verityskills.com", resource_metadata="https://mcp.verityskills.com/.well-known/oauth-protected-resource"';
+
+  it('returns 401 + WWW-Authenticate when initialize arrives without Authorization header', async () => {
+    const res = await SELF.fetch('http://example.com/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toBe(expectedWwwAuth);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+
+  it('returns 401 + WWW-Authenticate when tools/list arrives without Authorization header', async () => {
+    const res = await SELF.fetch('http://example.com/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toBe(expectedWwwAuth);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+
+  it('returns 401 + WWW-Authenticate when tools/call arrives without Authorization header', async () => {
+    const res = await SELF.fetch('http://example.com/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'verity-score', arguments: {} },
+      }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toBe(expectedWwwAuth);
+  });
+
+  it('CORS headers are preserved on the 401 challenge response', async () => {
+    const res = await SELF.fetch('http://example.com/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Access-Control-Allow-Headers')).toContain('authorization');
   });
 });

@@ -67,9 +67,25 @@ Embed this as a button on `verityskills.com/skills`:
 
 The user clicks the badge, Cursor prompts for confirmation, the server is added.
 
-### Option B: Manual config
+### Option B: Manual config with OAuth (recommended)
 
 Add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "verity": {
+      "url": "https://mcp.verityskills.com/mcp"
+    }
+  }
+}
+```
+
+Restart Cursor. The first time Cursor opens a session that touches `verity`, the Worker responds to the unauthenticated `POST /mcp` with `401 + WWW-Authenticate: Bearer realm="mcp.verityskills.com", resource_metadata="..."`. Cursor reads the `resource_metadata` pointer, fetches the OAuth Authorization Server metadata, and opens the consent screen at `https://verityskills.com/oauth/mcp/authorize` in the default browser. After magic-link sign-in and approval, Cursor stores the `vto_*` access token and retries `tools/list`. The six Verity tools appear in `Settings -> Tools & MCP -> verity`. Test by typing `Use coordination heat on GME` in chat.
+
+### Option C: Manual config with static `vtk_` token (no browser flow)
+
+For headless installs (CI, scripts, environments where the consent UI is inaccessible), paste the pre-issued user API key directly:
 
 ```json
 {
@@ -84,11 +100,19 @@ Add to `~/.cursor/mcp.json`:
 }
 ```
 
-Restart Cursor. Open settings -> MCP. Verity should appear with 6 tools listed. Test by typing `@verity-score NVDA` in chat.
+Restart Cursor. Open settings -> MCP. Verity should appear with 6 tools listed (no OAuth round-trip; the worker validates the `vtk_` token on every request). Use `https://verityskills.com/account/api-keys` to mint the token.
 
 ## Transports available
 
-Cursor connects via Streamable HTTP at `POST /mcp` (MCP 2025-03-26). The Worker also serves a legacy SSE bridge at `GET /sse` + `POST /sse` for clients that need EventSource handshake (Perplexity Comet today). Cursor does not need the legacy SSE path; the snippet above hits Streamable HTTP automatically. The server returns `Content-Type: application/json` for Cursor requests (Cursor's `mcp.json` direct-HTTP path does not send `text/event-stream` in Accept), and `Content-Type: text/event-stream` only when the client requests it.
+Cursor connects via Streamable HTTP at `POST /mcp` (MCP 2025-03-26). The Worker also serves a legacy SSE bridge at `GET /sse` + `POST /sse` for clients that need EventSource handshake (Perplexity Comet today). Cursor does not need the legacy SSE path; the snippets above hit Streamable HTTP automatically.
+
+Content-Type negotiation on `POST /mcp`: the Worker emits `application/json` by default and `text/event-stream` (as a single `event: message` frame, then stream close) when the `Accept` header contains `text/event-stream`. Cursor 1.x sends `Accept: application/json, text/event-stream` on the streamable-HTTP path and accepts either content type; both representations carry the same JSON-RPC envelope.
+
+## Eager-OAuth contract (issue #25)
+
+`POST /mcp` returns `401 + WWW-Authenticate` for any request without an `Authorization` header, including `initialize` and `tools/list`. This is required for Cursor's `mcp.json` HTTP install path: Cursor's MCP client FSM drives OAuth from the connection-open exchange (a 200 on `initialize` strands the FSM in `auth=unknown` and no tools surface to the agent, even after a successful out-of-band OAuth round-trip). The 401-challenge contract is the same one PostHog, Supabase, and other RFC 9728 MCP servers honor.
+
+The challenge subsumes the prior lazy-OAuth model (anonymous `tools/list` → 401 on `tools/call`). Clients that previously authenticated lazily (Claude Desktop today) also handle the eager challenge cleanly because the OAuth response to a `401 + WWW-Authenticate` is identical in both cases.
 
 ## Cursor team awareness
 
