@@ -21,9 +21,15 @@ import type { BearerResult } from '../src/auth';
 const REQUEST_ID = '0190b3e8-7f12-7abc-9def-0123456789ab';
 const RAW_OAUTH_TOKEN = 'vto_testtokenforupstreamvalidation';
 
+// VRT-166: WORKER_SHARED_SECRET is required on the OAuth path so the
+// Worker can prove its x-verity-user-id header came from a real OAuth
+// validation. The OAuth-path tests below assume it is present; a separate
+// test case below covers the misconfigured-secret 'oauth_misconfigured'
+// short-circuit.
 const supabaseEnv: ProxyEnv = {
   SUPABASE_URL: 'https://test-project.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'test-key',
+  WORKER_SHARED_SECRET: 'test-shared-secret-64-chars-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 };
 
 interface FetchCall {
@@ -120,6 +126,13 @@ describe('proxyToolCall OAuth-token branch: happy path', () => {
     expect(upstreamCall.headers['x-verity-user-id']).toBe(
       '99999999-9999-9999-9999-999999999999',
     );
+    // VRT-166: the shared secret MUST accompany x-verity-user-id so the
+    // upstream can prove the headers came from this Worker. Pinned to
+    // the exact env value so a future bug (e.g. forwarding a typo or
+    // truncated secret) becomes a test failure.
+    expect(upstreamCall.headers['x-worker-shared-secret']).toBe(
+      supabaseEnv.WORKER_SHARED_SECRET,
+    );
     // The raw token must NEVER appear in any upstream URL, header, or body.
     expect(upstreamCall.url).not.toContain(RAW_OAUTH_TOKEN);
     expect(upstreamCall.url).not.toContain('vto_');
@@ -213,13 +226,70 @@ describe('proxyToolCall OAuth-token branch: validation failures', () => {
   });
 
   it('oauth_misconfigured: missing SUPABASE_URL returns oauth_token_invalid:oauth_misconfigured + no DB call', async () => {
+    // VRT-166: WORKER_SHARED_SECRET MUST be set on the env passed to
+    // proxyToolCall, otherwise the new shared-secret guard short-circuits
+    // FIRST and this case stops exercising the Supabase-only misconfig
+    // branch (same outcome shape, different code path). Caught by Bugbot
+    // on the PR; keeping both branches under explicit test coverage.
     const { fetchImpl, calls } = makeStub(null, null);
     const outcome = await proxyToolCall(
       'verity-score',
       {},
       oauthAuth,
       REQUEST_ID,
-      { SUPABASE_SERVICE_ROLE_KEY: 'k' }, // SUPABASE_URL omitted
+      {
+        // SUPABASE_URL intentionally omitted to drive buildSupabaseClient -> null.
+        SUPABASE_SERVICE_ROLE_KEY: 'k',
+        WORKER_SHARED_SECRET: 'test-shared-secret-64-chars-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      fetchImpl,
+    );
+    expect(outcome.kind).toBe('oauth_token_invalid');
+    if (outcome.kind === 'oauth_token_invalid') {
+      expect(outcome.reason).toBe('oauth_misconfigured');
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('oauth_misconfigured: missing WORKER_SHARED_SECRET returns oauth_token_invalid:oauth_misconfigured BEFORE any DB or upstream call', async () => {
+    // VRT-166 fail-closed: if the Worker is deployed without the shared
+    // secret set, the OAuth path MUST refuse to forward upstream. A
+    // silent forward would 401 at the upstream (no shared-secret match)
+    // and look like infrastructure breakage instead of a config bug.
+    const { fetchImpl, calls } = makeStub(null, null);
+    const outcome = await proxyToolCall(
+      'verity-score',
+      {},
+      oauthAuth,
+      REQUEST_ID,
+      // SUPABASE_* set, but WORKER_SHARED_SECRET intentionally omitted.
+      {
+        SUPABASE_URL: 'https://test-project.supabase.co',
+        SUPABASE_SERVICE_ROLE_KEY: 'test-key',
+      },
+      fetchImpl,
+    );
+    expect(outcome.kind).toBe('oauth_token_invalid');
+    if (outcome.kind === 'oauth_token_invalid') {
+      expect(outcome.reason).toBe('oauth_misconfigured');
+    }
+    // No DB call AND no upstream call: the fail-closed must short-circuit
+    // before any network I/O.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('oauth_misconfigured: empty-string WORKER_SHARED_SECRET also fails closed', async () => {
+    const { fetchImpl, calls } = makeStub(null, null);
+    const outcome = await proxyToolCall(
+      'verity-score',
+      {},
+      oauthAuth,
+      REQUEST_ID,
+      {
+        SUPABASE_URL: 'https://test-project.supabase.co',
+        SUPABASE_SERVICE_ROLE_KEY: 'test-key',
+        WORKER_SHARED_SECRET: '',
+      },
       fetchImpl,
     );
     expect(outcome.kind).toBe('oauth_token_invalid');
