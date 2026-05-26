@@ -144,10 +144,37 @@ const handler = {
     // builders, which omit OAuth-specific fields including the
     // registration_endpoint so DCR-attempting clients fail-fast and fall
     // through to the bearer path).
-    if (req.method === 'GET' && url.pathname === '/.well-known/oauth-authorization-server') {
+    //
+    // Path-scoped well-known URLs (issue #25 follow-up): MCP 2025-06-18 §2.3
+    // mandates that when the MCP endpoint lives at a sub-path, the metadata
+    // URL is constructed by inserting `/.well-known/<doc>` between host and
+    // path. For Verity's `/mcp` endpoint that means clients query
+    // `/.well-known/oauth-protected-resource/mcp` (and the AS analog).
+    // Cursor 1.x and Claude Code 0.x both probe the path-scoped form before
+    // falling back to the unscoped form; without these routes Cursor sees
+    // 404 on discovery, then 404 on its DCR fallback path, and tombstones
+    // the streamable-HTTP connection after 5 consecutive 404s. PostHog's
+    // MCP server serves both forms (mcp.posthog.com/.well-known/
+    // oauth-protected-resource/mcp returns 200), which is how this was
+    // diagnosed.
+    //
+    // Both forms return identical documents — the canonical resource value
+    // stays `https://mcp.verityskills.com` (host-only, no `/mcp` path) so
+    // audience binding for existing `vto_*` tokens (aud: canonical resource)
+    // continues to work unchanged. The path suffix in the metadata URL is
+    // purely a discovery-routing artifact, not a separate resource.
+    if (
+      req.method === 'GET'
+      && (url.pathname === '/.well-known/oauth-authorization-server'
+        || url.pathname === '/.well-known/oauth-authorization-server/mcp')
+    ) {
       return jsonResponse(buildAuthorizationServerMetadata(env), 200);
     }
-    if (req.method === 'GET' && url.pathname === '/.well-known/oauth-protected-resource') {
+    if (
+      req.method === 'GET'
+      && (url.pathname === '/.well-known/oauth-protected-resource'
+        || url.pathname === '/.well-known/oauth-protected-resource/mcp')
+    ) {
       return jsonResponse(buildProtectedResourceMetadata(env), 200);
     }
 

@@ -48,6 +48,22 @@ describe('GET /.well-known/oauth-authorization-server', () => {
     const res = await SELF.fetch('http://example.com/.well-known/oauth-authorization-server');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
+
+  it('also serves the MCP-path-scoped form (MCP 2025-06-18 §2.3, issue #25 follow-up)', async () => {
+    // Cursor 1.x and Claude Code 0.x probe the path-scoped URL before the
+    // unscoped one. Both forms must return identical documents so audience
+    // binding stays consistent regardless of which URL the client used.
+    const scoped = await SELF.fetch(
+      'http://example.com/.well-known/oauth-authorization-server/mcp',
+    );
+    expect(scoped.status).toBe(200);
+    const scopedDoc = (await scoped.json()) as Record<string, unknown>;
+    const unscoped = await SELF.fetch(
+      'http://example.com/.well-known/oauth-authorization-server',
+    );
+    const unscopedDoc = (await unscoped.json()) as Record<string, unknown>;
+    expect(scopedDoc).toEqual(unscopedDoc);
+  });
 });
 
 describe('GET /.well-known/oauth-protected-resource', () => {
@@ -60,6 +76,26 @@ describe('GET /.well-known/oauth-protected-resource', () => {
       'https://mcp.verityskills.com/.well-known/oauth-authorization-server',
     ]);
     expect(doc['bearer_methods_supported']).toEqual(['header']);
+  });
+
+  it('also serves the MCP-path-scoped form (MCP 2025-06-18 §2.3, issue #25 follow-up)', async () => {
+    // RFC 9728 §3.1 says to insert the well-known segment between host
+    // and path of the resource identifier. For Verity the MCP server
+    // lives at `/mcp` so the spec-correct URL is
+    // `/.well-known/oauth-protected-resource/mcp`. The Worker serves
+    // the same document at both URLs (the `resource` field stays
+    // host-only so audience binding for vto_* tokens does not break).
+    const scoped = await SELF.fetch(
+      'http://example.com/.well-known/oauth-protected-resource/mcp',
+    );
+    expect(scoped.status).toBe(200);
+    const scopedDoc = (await scoped.json()) as Record<string, unknown>;
+    expect(scopedDoc['resource']).toBe('https://mcp.verityskills.com');
+    const unscoped = await SELF.fetch(
+      'http://example.com/.well-known/oauth-protected-resource',
+    );
+    const unscopedDoc = (await unscoped.json()) as Record<string, unknown>;
+    expect(scopedDoc).toEqual(unscopedDoc);
   });
 });
 
