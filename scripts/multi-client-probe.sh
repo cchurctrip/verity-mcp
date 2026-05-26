@@ -77,6 +77,27 @@ else
   fail "discovery" "reg=$AS_REG pkce=$AS_PKCE scopes=$AS_SCOPES pr_resource=$PR_RES"
 fi
 
+# Probe 10c: path-scoped metadata URLs (MCP 2025-06-18 §2.3 / RFC 9728 §3.1).
+# Cursor 1.x and Claude Code 0.x query the path-scoped form first; without
+# this route the MCP-spec-conformant client tombstones after 5 consecutive
+# 404s. Both forms must return identical documents.
+echo "Probe 10c/12: path-scoped well-known URLs (MCP 2025-06-18)"
+PR_SCOPED_STATUS=$(curl -sS -m 10 -o /tmp/pr-scoped.json -w '%{http_code}' \
+  "$BASE_URL/.well-known/oauth-protected-resource/mcp" || true)
+AS_SCOPED_STATUS=$(curl -sS -m 10 -o /tmp/as-scoped.json -w '%{http_code}' \
+  "$BASE_URL/.well-known/oauth-authorization-server/mcp" || true)
+PR_SCOPED_RES=$(jq -r '.resource // empty' /tmp/pr-scoped.json 2>/dev/null || echo "")
+AS_SCOPED_REG=$(jq -r '.registration_endpoint // empty' /tmp/as-scoped.json 2>/dev/null || echo "")
+if [ "$PR_SCOPED_STATUS" = "200" ] \
+   && [ "$AS_SCOPED_STATUS" = "200" ] \
+   && [ "$PR_SCOPED_RES" = "$BASE_URL" ] \
+   && [ "$AS_SCOPED_REG" = "$BASE_URL/oauth/register" ]; then
+  pass "path-scoped: PR/mcp + AS/mcp both 200, same resource + registration_endpoint values"
+else
+  fail "path-scoped" "pr=$PR_SCOPED_STATUS as=$AS_SCOPED_STATUS pr_res=$PR_SCOPED_RES as_reg=$AS_SCOPED_REG"
+fi
+rm -f /tmp/pr-scoped.json /tmp/as-scoped.json
+
 # Probe 10b: POST /oauth/register answers the RFC 7591 DCR shape with the
 # Cursor allowlist client_id (issue #25). The endpoint is idempotent and
 # safe to call from a probe; no DB writes happen.
