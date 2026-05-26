@@ -131,12 +131,18 @@ describe('tools/call: 401 upstream verbatim forward', () => {
         headers: { 'content-type': 'application/json' },
       });
 
-    const res = await callMcp({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name: 'verity-score', arguments: { subject: 'X' } },
-    });
+    // Send a syntactically-valid bearer so the edge eager-OAuth challenge
+    // (issue #25) does not short-circuit the request. The upstream interceptor
+    // is the source of the 401 under test, not the worker edge.
+    const res = await callMcp(
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'verity-score', arguments: { subject: 'X' } },
+      },
+      { authorization: 'Bearer vtk_a' },
+    );
     expect(res.status).toBe(401);
     const body = await res.json();
     const { upstream, isError } = unwrapToolsCall(body);
@@ -253,12 +259,18 @@ describe('tools/call: arguments validation short-circuits at the worker edge', (
   it.each([['null', null], ['number', 42], ['array', ['a']]])(
     'arguments=%s returns -32602 without calling upstream',
     async (_label, badArgs) => {
-      const res = await callMcp({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: { name: 'verity-score', arguments: badArgs },
-      });
+      // Auth header present so the edge eager-OAuth challenge (issue #25) is
+      // not what's under test; the assertion is on the -32602 args-validation
+      // path inside handleMcpRequest.
+      const res = await callMcp(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'verity-score', arguments: badArgs },
+        },
+        { authorization: 'Bearer vtk_a' },
+      );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { error: { code: number } };
       expect(body.error.code).toBe(-32602);
@@ -319,15 +331,25 @@ describe('Auth contract: x-verity-key carries raw token, never Bearer prefix', (
 // drop at the transport layer. This test verifies the wrap does not crash
 // the worker on a routine request path.
 describe('Sentry.withSentry wrap smoke', () => {
+  // Auth header included on both probes so the edge eager-OAuth challenge
+  // (issue #25) is not what's under test; the assertion is that the Sentry
+  // wrap does not crash on a routine authenticated request through the
+  // wrapped handler.
   it('initialize completes through the wrapped handler without crashing', async () => {
-    const res = await callMcp({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    const res = await callMcp(
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+      { authorization: 'Bearer vtk_a' },
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result: { protocolVersion: string } };
     expect(body.result.protocolVersion).toBe('2025-03-26');
   });
 
   it('tools/list completes through the wrapped handler without crashing', async () => {
-    const res = await callMcp({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    const res = await callMcp(
+      { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+      { authorization: 'Bearer vtk_a' },
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
     expect(body.result.tools).toHaveLength(6);

@@ -313,6 +313,57 @@ const handler = {
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
+      // RFC 6750 + RFC 9728 eager-OAuth challenge (issue #25). When the
+      // request has no Authorization header at all, short-circuit with a
+      // 401 + WWW-Authenticate BEFORE handleMcpRequest. This is what drives
+      // Cursor's `mcp.json` direct-HTTP install path through OAuth: Cursor's
+      // FSM keys off the 401 challenge during connection-open to discover
+      // the auth server and trigger the consent flow. Without the challenge
+      // Cursor stays in `auth=unknown`, never enumerates tools, and the
+      // user sees "No tools, prompts, or resources" in the MCP settings
+      // panel even though OAuth metadata was fetched.
+      //
+      // Previously the Worker served unauthenticated `initialize` and
+      // `tools/list` as 200 to support a lazy-OAuth pattern (anonymous
+      // metadata exchange, then 401 on the first `tools/call`). That
+      // pattern works for Claude Desktop today (see comment in
+      // outcomeToResponse 'forward' case in src/mcp.ts) but is incompatible
+      // with Cursor 1.x's mcp.json HTTP path, ChatGPT Desktop's connector
+      // flow, and the RFC 6750 §3 expectation that any access to a
+      // protected resource without a valid token gets a 401 challenge.
+      // The eager challenge subsumes the lazy one: clients that handle
+      // 401-on-tools/call (Claude Desktop today) also handle 401-on-any-
+      // request because the OAuth response to a 401 is the same. The
+      // anonymous-fallback story for verity-score / morning-brief is
+      // dropped intentionally; both tools returned zero-stub data without
+      // auth and were not useful in practice.
+      //
+      // A malformed Authorization header (kind === 'invalid') is NOT
+      // caught here. handleMcpRequest's existing bearer_invalid path
+      // returns 401 + WWW-Authenticate with the INVALID_BEARER_FORMAT
+      // code, which gives clients a distinct signal ("you sent something,
+      // but I don't recognize it" vs "you sent nothing"). Valid vtk_ or
+      // vto_ tokens pass through; OAuth-token validity is re-checked at
+      // tools/call dispatch time against mcp_oauth_tokens.
+      const inboundAuth = readBearer(req);
+      if (inboundAuth.kind === 'absent') {
+        return new Response(
+          JSON.stringify({
+            code: 'AUTHENTICATION_REQUIRED',
+            error:
+              "Authorization header required. Complete OAuth at https://mcp.verityskills.com/authorize or send 'Bearer vtk_<token>'.",
+          }),
+          {
+            status: 401,
+            headers: {
+              ...CORS_HEADERS,
+              'Content-Type': 'application/json',
+              'WWW-Authenticate': WWW_AUTHENTICATE_VALUE,
+            },
+          },
+        );
+      }
+
       const startedAt = Date.now();
       const result = await handleMcpRequest(req, env);
 

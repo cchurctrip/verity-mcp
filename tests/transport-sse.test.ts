@@ -162,10 +162,16 @@ describe('KEEP_ALIVE_BYTES: pinned constant (risk 1 mitigation)', () => {
 });
 
 describe('POST /mcp content negotiation (integration, VRT-165)', () => {
+  // Issue #25: every probe carries `Authorization: Bearer vtk_test` so the
+  // edge eager-OAuth challenge does not short-circuit before the
+  // content-negotiation branch. Content-Type routing is the assertion
+  // under test; auth is upstream of it.
+  const AUTH = { Authorization: 'Bearer vtk_test' };
+
   it('without Accept header: Content-Type application/json (Cursor + synthetic-smoke contract)', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
     expect(res.status).toBe(200);
@@ -180,6 +186,7 @@ describe('POST /mcp content negotiation (integration, VRT-165)', () => {
       headers: {
         'content-type': 'application/json',
         'accept': 'text/event-stream',
+        ...AUTH,
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
@@ -201,6 +208,7 @@ describe('POST /mcp content negotiation (integration, VRT-165)', () => {
       headers: {
         'content-type': 'application/json',
         'accept': 'application/json, text/event-stream',
+        ...AUTH,
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
     });
@@ -212,7 +220,7 @@ describe('POST /mcp content negotiation (integration, VRT-165)', () => {
   it('with Accept: */* alone: stays Content-Type application/json (Cursor regression, Gate-2 S2)', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'accept': '*/*' },
+      headers: { 'content-type': 'application/json', 'accept': '*/*', ...AUTH },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
     expect(res.headers.get('Content-Type')).toBe('application/json');
@@ -222,7 +230,7 @@ describe('POST /mcp content negotiation (integration, VRT-165)', () => {
   it('with Accept: application/json alone: stays Content-Type application/json (Cursor regression, Gate-2 S2)', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+      headers: { 'content-type': 'application/json', 'accept': 'application/json', ...AUTH },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
     expect(res.headers.get('Content-Type')).toBe('application/json');
