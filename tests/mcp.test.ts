@@ -236,7 +236,7 @@ describe('outcomeToResponse', () => {
   const id = 7;
 
   it('forward wraps upstream 2xx body in MCP content envelope, no isError', () => {
-    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: { ok: true }, upstreamStatus: 200 };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: { ok: true }, upstreamStatus: 200, authPath: 'vtk' };
     expect(outcomeToResponse(outcome, id)).toEqual({
       body: {
         jsonrpc: '2.0',
@@ -258,7 +258,10 @@ describe('outcomeToResponse', () => {
     // unauthenticated. Confirmed live 2026-05-25; this test pins the
     // regression guard.
     const body = { error: 'X-Verity-Key header required. Get your API key from your account dashboard.' };
-    const outcome: ProxyOutcome = { kind: 'forward', status: 401, body, upstreamStatus: 401 };
+    // authPath: 'anonymous' is the lazy-OAuth trigger case. The 'oauth'
+    // path is asserted in its own test below (#25 part 9: NO WWW-Auth
+    // re-trigger when bearer was already valid; loop-prevention).
+    const outcome: ProxyOutcome = { kind: 'forward', status: 401, body, upstreamStatus: 401, authPath: 'anonymous' };
     const r = outcomeToResponse(outcome, id);
     expect(r.status).toBe(401);
     expect(r.headers).toEqual({
@@ -275,8 +278,38 @@ describe('outcomeToResponse', () => {
     });
   });
 
+  it('forward + status=401 + authPath=oauth: returns HTTP 200 + isError, NEVER WWW-Authenticate (#25 part 9: loop prevention)', () => {
+    // 2026-05-26 live regression: with a valid vto_* bearer, upstream
+    // returned 401 ("X-Verity-Key header required" -- the upstream API has
+    // not been wired to read x-verity-user-id). The pre-fix Worker
+    // propagated the 401 + WWW-Authenticate verbatim to mcp-remote, which
+    // told the @modelcontextprotocol/sdk to re-auth, which succeeded
+    // (token still valid), retried, got 401 again, re-authed, retried, ...
+    // The Cursor MCP bridge hung for ~15 minutes before the user killed
+    // it. The MCP-canonical fix is to surface upstream auth failures on
+    // the OAuth path as HTTP 200 + result.isError=true (a tool error,
+    // not a transport error). The error_description tells the human what
+    // is actually wrong so support can act on it.
+    const body = { error: 'X-Verity-Key header required. Get your API key from your account dashboard.' };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 401, body, upstreamStatus: 401, authPath: 'oauth' };
+    const r = outcomeToResponse(outcome, id);
+    expect(r.status).toBe(200);
+    expect(r.headers).toBeUndefined();
+    const env = r.body as {
+      result: {
+        content: ReadonlyArray<{ type: 'text'; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(env.result.isError).toBe(true);
+    const inner = JSON.parse(env.result.content[0]!.text) as Record<string, unknown>;
+    expect(inner['error']).toBe('oauth_upstream_unwired');
+    expect(inner['error_description']).toMatch(/upstream Verity API has not yet been wired/);
+    expect(inner['upstream_body']).toEqual(body);
+  });
+
   it('forward does NOT attach WWW-Authenticate on non-401 errors (402 trial cap, 5xx, etc.)', () => {
-    const outcome: ProxyOutcome = { kind: 'forward', status: 402, body: { code: 'TRIAL_CAP_REACHED' }, upstreamStatus: 402 };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 402, body: { code: 'TRIAL_CAP_REACHED' }, upstreamStatus: 402, authPath: 'vtk' };
     const r = outcomeToResponse(outcome, id);
     expect(r.status).toBe(402);
     expect(r.headers).toBeUndefined();
@@ -284,7 +317,7 @@ describe('outcomeToResponse', () => {
 
   it('forward preserves 402 status AND sets isError: true on non-2xx upstream forwards', () => {
     const body = { code: 'TRIAL_CAP_REACHED', upgrade_url: 'https://verityskills.com/upgrade?return_to=mcp&via=cap' };
-    const outcome: ProxyOutcome = { kind: 'forward', status: 402, body, upstreamStatus: 402 };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 402, body, upstreamStatus: 402, authPath: 'vtk' };
     const r = outcomeToResponse(outcome, id);
     expect(r.status).toBe(402);
     expect(r.body).toEqual({
@@ -305,7 +338,7 @@ describe('outcomeToResponse', () => {
   // and broke every spec-conforming MCP client.
   it('forward result.content[0] is type=text and text parses back to the upstream body', () => {
     const upstream = { ticker: 'NVDA', score: 75, breakdown: { coordination: 0.4 } };
-    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: upstream, upstreamStatus: 200 };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: upstream, upstreamStatus: 200, authPath: 'vtk' };
     const r = outcomeToResponse(outcome, id);
     const env = r.body as { result: { content: ReadonlyArray<{ type: string; text: string }>; isError?: boolean } };
     expect(env.result.content).toHaveLength(1);

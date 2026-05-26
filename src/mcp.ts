@@ -206,6 +206,40 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
   switch (outcome.kind) {
     case 'forward': {
       const isError = outcome.status < 200 || outcome.status >= 300;
+      // Special case: when the OAuth path resolved the request (vto_* token
+      // validated, x-verity-user-id sent upstream) and upstream STILL
+      // returns 401, do NOT propagate the 401 status or WWW-Authenticate
+      // to the MCP client. The bearer was already valid; sending the
+      // client back through OAuth loops forever (mcp-remote +
+      // @modelcontextprotocol/sdk reset _hasCompletedAuthFlow, retry,
+      // get 401 again, eventually throw -- in Cursor's case the bridge
+      // hung for ~15 minutes before the user cancelled). Surface as an
+      // MCP-canonical tool error (HTTP 200 + result.isError=true) so the
+      // human sees a meaningful upstream-wiring message instead of an
+      // OAuth loop. Issue #25 part 9.
+      if (outcome.status === 401 && outcome.authPath === 'oauth') {
+        return {
+          body: {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    error: 'oauth_upstream_unwired',
+                    error_description:
+                      'Your OAuth session is valid but the upstream Verity API has not yet been wired to accept x-verity-user-id. Re-authentication will not help; contact support@verityskills.com.',
+                    upstream_body: outcome.body,
+                  }),
+                },
+              ],
+              isError: true,
+            },
+          },
+          status: 200,
+        };
+      }
       // RFC 6750 §3 mandates WWW-Authenticate on every 401. The Worker
       // already attaches it on bearer_invalid + oauth_token_invalid below,
       // but the upstream-forward path (auth.kind === 'absent', upstream

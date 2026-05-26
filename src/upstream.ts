@@ -190,7 +190,21 @@ export function rewriteUpgradeUrl(status: number, body: unknown): unknown {
 //   upstream_network_error -> HTTP 200 + JSON-RPC -32603 with error.data
 //                              carrying error_name + cause
 export type ProxyOutcome =
-  | { kind: 'forward'; status: number; body: unknown; upstreamStatus: number }
+  // authPath records WHICH auth path resolved the request before the
+  // upstream forward. The MCP response layer needs this distinction to
+  // decide whether a 401 from upstream should re-trigger client OAuth
+  // (anonymous / vtk_ path: yes, client should authenticate) or surface
+  // as an upstream-side wiring bug (oauth path: NO, sending the client
+  // back to OAuth just loops because the bearer was already valid).
+  // Issue #25 part 9. The `authPath` field is required so a future code
+  // path that emits 'forward' must explicitly decide which case it is.
+  | {
+      kind: 'forward';
+      status: number;
+      body: unknown;
+      upstreamStatus: number;
+      authPath: 'anonymous' | 'vtk' | 'oauth';
+    }
   | { kind: 'bearer_invalid' }
   | { kind: 'tool_disabled'; tool: string }
   | { kind: 'unknown_tool'; tool: string }
@@ -341,10 +355,23 @@ export async function proxyToolCall(
 
   // 402 with TRIAL_CAP_REACHED -> rewrite upgrade_url, forward verbatim
   // otherwise. 2xx, 401, 403 forwarded as-is.
+  //
+  // authPath classification:
+  //   - 'oauth'      vto_* token validated, x-verity-user-id sent upstream
+  //   - 'vtk'        vtk_* token forwarded as x-verity-key
+  //   - 'anonymous'  no bearer present, upstream decides
+  // The caller (mcp.ts:outcomeToResponse) uses this to decide whether an
+  // upstream 401 should propagate as HTTP 401 + WWW-Authenticate (the
+  // anonymous / vtk path: the client SHOULD authenticate) or be wrapped
+  // as HTTP 200 + isError (the oauth path: bearer already valid, looping
+  // OAuth would not help the user).
+  const authPath: 'anonymous' | 'vtk' | 'oauth' =
+    resolvedOauthUserId !== null ? 'oauth' : auth.kind === 'valid' ? 'vtk' : 'anonymous';
   return {
     kind: 'forward',
     status: upstream.status,
     body: rewriteUpgradeUrl(upstream.status, upstreamBody),
     upstreamStatus: upstream.status,
+    authPath,
   };
 }
