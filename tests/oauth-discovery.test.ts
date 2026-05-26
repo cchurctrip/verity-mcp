@@ -23,15 +23,20 @@ describe('buildAuthorizationServerMetadata (RFC 8414)', () => {
     expect(doc['token_endpoint_auth_methods_supported']).toEqual(['none']);
   });
 
-  it('OMITS registration_endpoint (arch review R4: allowlist-only v1)', () => {
+  it('advertises registration_endpoint (issue #25: RFC 7591 DCR bridge)', () => {
+    // Per issue #25 the AS metadata now advertises the registration endpoint
+    // so RFC 7591 DCR clients (Cursor 1.x today) auto-discover the bridge.
+    // The endpoint itself is implemented in src/oauth-register.ts and serves
+    // the pre-registered allowlist client_ids.
     const doc = buildAuthorizationServerMetadata({});
-    expect(doc['registration_endpoint']).toBeUndefined();
+    expect(doc['registration_endpoint']).toBe('https://mcp.verityskills.com/oauth/register');
   });
 
-  it('omits authorization_endpoint + token_endpoint when MCP_OAUTH_KILL_SWITCH is on', () => {
+  it('omits authorization_endpoint + token_endpoint + registration_endpoint when MCP_OAUTH_KILL_SWITCH is on', () => {
     const doc = buildAuthorizationServerMetadata({ MCP_OAUTH_KILL_SWITCH: 'on' });
     expect(doc['authorization_endpoint']).toBeUndefined();
     expect(doc['token_endpoint']).toBeUndefined();
+    expect(doc['registration_endpoint']).toBeUndefined();
     // issuer + non-OAuth-endpoint keys remain so clients can identify the doc
     expect(doc['issuer']).toBe('https://mcp.verityskills.com');
     expect(doc['scopes_supported']).toEqual(['mcp:invoke']);
@@ -41,6 +46,7 @@ describe('buildAuthorizationServerMetadata (RFC 8414)', () => {
     for (const v of ['true', '1', 'yes', 'ON', '']) {
       const doc = buildAuthorizationServerMetadata({ MCP_OAUTH_KILL_SWITCH: v });
       expect(doc['token_endpoint']).toBe('https://mcp.verityskills.com/oauth/token');
+      expect(doc['registration_endpoint']).toBe('https://mcp.verityskills.com/oauth/register');
     }
   });
 });

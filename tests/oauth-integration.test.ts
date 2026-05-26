@@ -31,7 +31,7 @@ afterAll(() => {
 });
 
 describe('GET /.well-known/oauth-authorization-server', () => {
-  it('returns RFC 8414 metadata with the right endpoints + omits registration_endpoint', async () => {
+  it('returns RFC 8414 metadata with the right endpoints + advertises registration_endpoint (issue #25)', async () => {
     const res = await SELF.fetch('http://example.com/.well-known/oauth-authorization-server');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('application/json');
@@ -41,7 +41,7 @@ describe('GET /.well-known/oauth-authorization-server', () => {
     expect(doc['token_endpoint']).toBe('https://mcp.verityskills.com/oauth/token');
     expect(doc['code_challenge_methods_supported']).toEqual(['S256']);
     expect(doc['scopes_supported']).toEqual(['mcp:invoke']);
-    expect(doc['registration_endpoint']).toBeUndefined();
+    expect(doc['registration_endpoint']).toBe('https://mcp.verityskills.com/oauth/register');
   });
 
   it('CORS allow-origin is * (MCP clients from any origin discover the doc)', async () => {

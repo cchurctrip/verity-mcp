@@ -39,6 +39,7 @@ import {
   type OauthDiscoveryEnv,
 } from './oauth-discovery';
 import { CANONICAL_RESOURCE_URI } from './oauth-canonical';
+import { handleOauthRegister, type OauthRegisterEnv } from './oauth-register';
 import { handleOauthToken, type OauthTokenEnv } from './oauth-token';
 import {
   buildLogLine,
@@ -59,7 +60,7 @@ import {
 // system: adding a required key to McpEnv or ObservabilityEnv becomes a
 // compile error here rather than silently working until the first request
 // in production.
-export interface Env extends McpEnv, ObservabilityEnv, OauthDiscoveryEnv, OauthTokenEnv {
+export interface Env extends McpEnv, ObservabilityEnv, OauthDiscoveryEnv, OauthRegisterEnv, OauthTokenEnv {
   MCP_KILL_SWITCH?: string;
   /**
    * Build-time stamped git SHA of the deployed Worker. Set by the deploy
@@ -134,13 +135,15 @@ const handler = {
       );
     }
 
-    // VRT-166 OAuth 2.1 surface. Three new routes.
+    // VRT-166 OAuth 2.1 surface. Four routes (two discovery + token +
+    // register).
     //
     // Discovery endpoints (RFC 8414 + RFC 9728) are public, unauthenticated,
     // and gated only by the global MCP_KILL_SWITCH (already returned above)
     // and the OAuth-specific MCP_OAUTH_KILL_SWITCH (handled inside the
-    // builders, which omit OAuth-specific fields so DCR-attempting clients
-    // fail-fast and fall through to the bearer path).
+    // builders, which omit OAuth-specific fields including the
+    // registration_endpoint so DCR-attempting clients fail-fast and fall
+    // through to the bearer path).
     if (req.method === 'GET' && url.pathname === '/.well-known/oauth-authorization-server') {
       return jsonResponse(buildAuthorizationServerMetadata(env), 200);
     }
@@ -229,6 +232,18 @@ const handler = {
         consentUrl.searchParams.set('resource', CANONICAL_RESOURCE_URI);
       }
       return Response.redirect(consentUrl.toString(), 302);
+    }
+
+    // /oauth/register (RFC 7591). Dynamic Client Registration bridge for
+    // allowlist-only v1 (issue #25). Returns the pre-registered client_id
+    // matching the inbound `client_name` (case-insensitive substring) so
+    // Cursor 1.x's mcp.json HTTP install path proceeds past its DCR step
+    // instead of tombstoning the connection on a 404. Kill-switched in
+    // parity with /oauth/token. See src/oauth-register.ts for the
+    // security argument.
+    if (req.method === 'POST' && url.pathname === '/oauth/register') {
+      const registerResult = await handleOauthRegister(req, env);
+      return jsonResponse(registerResult.body, registerResult.status, registerResult.headers);
     }
 
     // /oauth/token (RFC 6749). authorization_code + refresh_token grants
