@@ -99,6 +99,49 @@ describe('GET /.well-known/oauth-protected-resource', () => {
   });
 });
 
+describe('GET /mcp method-not-allowed contract (MCP 2025-03-26 §3.5)', () => {
+  it('returns 405 + Allow: POST so Cursor stops falling back to legacy SSE', async () => {
+    // Without this branch GET /mcp falls through to the catch-all 404,
+    // which Cursor 1.x interprets as "streamable HTTP not supported" and
+    // attempts the legacy SSE fallback. Per MCP 2025-03-26 §3.5 a server
+    // that does not offer a server-initiated stream MUST respond 405; the
+    // client then knows to use POST only.
+    const res = await SELF.fetch('http://example.com/mcp', { method: 'GET' });
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toContain('POST');
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['code']).toBe('METHOD_NOT_ALLOWED');
+  });
+
+  it('CORS headers are preserved on the 405 response', async () => {
+    const res = await SELF.fetch('http://example.com/mcp', { method: 'GET' });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+});
+
+describe('Path-scoped /sse alias (MCP 2024-11-05 + 2025-06-18 §2.3)', () => {
+  it('GET /sse/mcp behaves like GET /sse (bearer-required: returns 401 without auth)', async () => {
+    const res = await SELF.fetch('http://example.com/sse/mcp', { method: 'GET' });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('WWW-Authenticate')).toContain('Bearer');
+  });
+
+  it('POST /sse/mcp behaves like POST /sse (routes through handleMcpRequest)', async () => {
+    // The eager-OAuth challenge applies only to POST /mcp, not to the
+    // legacy SSE bridge, so an unauthenticated POST /sse/mcp falls
+    // through to handleMcpRequest and returns whatever the handler
+    // would for an empty / malformed body — 200 with an error envelope
+    // rather than a transport-level 404 from the path mismatch.
+    const res = await SELF.fetch('http://example.com/sse/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer vtk_test' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('WWW-Authenticate header on 401 responses (RFC 6750 + RFC 9728)', () => {
   const expectedValue =
     'Bearer realm="mcp.verityskills.com", resource_metadata="https://mcp.verityskills.com/.well-known/oauth-protected-resource"';

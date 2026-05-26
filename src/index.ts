@@ -289,7 +289,18 @@ const handler = {
     // relays the response over the open same-isolate stream. See
     // src/transport-sse.ts for the framing contract and cross-isolate
     // fallback policy (VRT-165).
-    if (req.method === 'GET' && url.pathname === '/sse') {
+    //
+    // Path-scoped /sse/mcp accepted for symmetry with the path-scoped
+    // well-known URLs (MCP 2025-06-18 §2.3). Cursor 1.x's streamable-HTTP
+    // failure path falls back to legacy SSE by appending the MCP server
+    // sub-path to the SSE URL — without the alias the fallback hits 404
+    // and the user sees `Error connecting to SSE server after fallback`
+    // in the MCP log even though the streamable-HTTP failure was unrelated
+    // to /sse semantics.
+    if (
+      req.method === 'GET'
+      && (url.pathname === '/sse' || url.pathname === '/sse/mcp')
+    ) {
       const auth = readBearer(req);
       // /sse currently supports only the vtk_* user-API-key path. OAuth-token
       // (vto_) callers are explicitly rejected here because the legacy SSE
@@ -311,7 +322,10 @@ const handler = {
       return openSseEndpointStream(bearerHash, url, ctx);
     }
 
-    if (req.method === 'POST' && url.pathname === '/sse') {
+    if (
+      req.method === 'POST'
+      && (url.pathname === '/sse' || url.pathname === '/sse/mcp')
+    ) {
       const startedAt = Date.now();
       const result = await handleMcpRequest(req, env);
       logRequest(
@@ -352,6 +366,47 @@ const handler = {
 
       // MCP 2024-11-05 section 6.2.2 fallback.
       return jsonResponse(result.body, result.status, result.headers);
+    }
+
+    // GET /mcp → 405 Method Not Allowed (MCP 2025-03-26 §3.5 Streamable
+    // HTTP). The spec allows two modes for the server-to-client direction:
+    // (a) open an SSE stream on GET, or (b) return 405 to signal "no
+    // server-initiated streaming, client posts only". Verity implements (b)
+    // because all current tool calls are synchronous request/response
+    // (upstream verityskills.com returns JSON envelopes, no long-running
+    // jobs that would need server-push) and adding an SSE stream here
+    // would complicate the auth + token-passthrough story without a
+    // user-visible win.
+    //
+    // Without this branch GET /mcp falls through to the catch-all 404,
+    // which Cursor 1.x's MCP client interprets as "streamable HTTP not
+    // supported, fall back to legacy SSE". The fallback chain then also
+    // 404s (since Cursor probes /sse/mcp before our path-scoped alias
+    // existed) and the user sees `Error connecting to streamableHttp
+    // server` plus `Error connecting to SSE server after fallback` in the
+    // MCP log even though POST /mcp would have worked. 405 is the
+    // spec-correct "don't fall back" signal.
+    //
+    // Path-scoped /mcp/mcp is not aliased here intentionally: the MCP
+    // server URL is /mcp, period. The path-scoped well-known URLs are a
+    // discovery convention (RFC 9728 §3.1), not a request-routing
+    // convention.
+    if (req.method === 'GET' && url.pathname === '/mcp') {
+      return new Response(
+        JSON.stringify({
+          code: 'METHOD_NOT_ALLOWED',
+          error: 'GET /mcp is not supported; POST a JSON-RPC envelope instead. See MCP 2025-03-26 §3.5.',
+        }),
+        {
+          status: 405,
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': 'application/json',
+            // RFC 7231 §7.4.1: 405 responses MUST include Allow.
+            Allow: 'POST, OPTIONS',
+          },
+        },
+      );
     }
 
     if (req.method === 'POST' && url.pathname === '/mcp') {
