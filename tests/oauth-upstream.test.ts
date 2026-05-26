@@ -226,13 +226,22 @@ describe('proxyToolCall OAuth-token branch: validation failures', () => {
   });
 
   it('oauth_misconfigured: missing SUPABASE_URL returns oauth_token_invalid:oauth_misconfigured + no DB call', async () => {
+    // VRT-166: WORKER_SHARED_SECRET MUST be set on the env passed to
+    // proxyToolCall, otherwise the new shared-secret guard short-circuits
+    // FIRST and this case stops exercising the Supabase-only misconfig
+    // branch (same outcome shape, different code path). Caught by Bugbot
+    // on the PR; keeping both branches under explicit test coverage.
     const { fetchImpl, calls } = makeStub(null, null);
     const outcome = await proxyToolCall(
       'verity-score',
       {},
       oauthAuth,
       REQUEST_ID,
-      { SUPABASE_SERVICE_ROLE_KEY: 'k' }, // SUPABASE_URL omitted
+      {
+        // SUPABASE_URL intentionally omitted to drive buildSupabaseClient -> null.
+        SUPABASE_SERVICE_ROLE_KEY: 'k',
+        WORKER_SHARED_SECRET: 'test-shared-secret-64-chars-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
       fetchImpl,
     );
     expect(outcome.kind).toBe('oauth_token_invalid');
