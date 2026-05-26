@@ -58,23 +58,42 @@ fail() {
 # ================================================================
 
 # Probe 10: discovery endpoints conformant per RFC 8414 + RFC 9728.
-# Verifies registration_endpoint is OMITTED (R4: no DCR in v1),
-# code_challenge_methods_supported is exactly ["S256"], scopes_supported
-# includes "mcp:invoke".
+# Verifies registration_endpoint is PRESENT (issue #25: RFC 7591 DCR
+# bridge for Cursor 1.x), code_challenge_methods_supported is exactly
+# ["S256"], scopes_supported includes "mcp:invoke".
 echo "Probe 10/12: OAuth discovery (RFC 8414 + 9728)"
 AS_DOC=$(curl -sS -m 10 "$BASE_URL/.well-known/oauth-authorization-server" || true)
 PR_DOC=$(curl -sS -m 10 "$BASE_URL/.well-known/oauth-protected-resource" || true)
-AS_HAS_REG=$(printf '%s' "$AS_DOC" | jq -r 'has("registration_endpoint")' 2>/dev/null || echo "parse_error")
+AS_REG=$(printf '%s' "$AS_DOC" | jq -r '.registration_endpoint // empty' 2>/dev/null || echo "parse_error")
 AS_PKCE=$(printf '%s' "$AS_DOC" | jq -c '.code_challenge_methods_supported // empty' 2>/dev/null || echo "")
 AS_SCOPES=$(printf '%s' "$AS_DOC" | jq -c '.scopes_supported // empty' 2>/dev/null || echo "")
 PR_RES=$(printf '%s' "$PR_DOC" | jq -r '.resource // empty' 2>/dev/null || echo "")
-if [ "$AS_HAS_REG" = "false" ] \
+if [ "$AS_REG" = "$BASE_URL/oauth/register" ] \
    && [ "$AS_PKCE" = '["S256"]' ] \
    && printf '%s' "$AS_SCOPES" | grep -q 'mcp:invoke' \
    && [ "$PR_RES" = "$BASE_URL" ]; then
-  pass "discovery: registration_endpoint omitted, S256-only, mcp:invoke present, resource matches"
+  pass "discovery: registration_endpoint advertised, S256-only, mcp:invoke present, resource matches"
 else
-  fail "discovery" "has_reg=$AS_HAS_REG pkce=$AS_PKCE scopes=$AS_SCOPES pr_resource=$PR_RES"
+  fail "discovery" "reg=$AS_REG pkce=$AS_PKCE scopes=$AS_SCOPES pr_resource=$PR_RES"
+fi
+
+# Probe 10b: POST /oauth/register answers the RFC 7591 DCR shape with the
+# Cursor allowlist client_id (issue #25). The endpoint is idempotent and
+# safe to call from a probe; no DB writes happen.
+echo "Probe 10b/12: /oauth/register (RFC 7591 DCR bridge)"
+REG_RESP=$(curl -sS -m 10 -X POST "$BASE_URL/oauth/register" \
+  -H 'content-type: application/json' \
+  -d '{"client_name":"Cursor","redirect_uris":["http://localhost:0/oauth/callback"]}' \
+  || true)
+REG_CLIENT_ID=$(printf '%s' "$REG_RESP" | jq -r '.client_id // empty' 2>/dev/null || echo "")
+REG_AUTH_METHOD=$(printf '%s' "$REG_RESP" | jq -r '.token_endpoint_auth_method // empty' 2>/dev/null || echo "")
+REG_SCOPE=$(printf '%s' "$REG_RESP" | jq -r '.scope // empty' 2>/dev/null || echo "")
+if [ "$REG_CLIENT_ID" = "cursor" ] \
+   && [ "$REG_AUTH_METHOD" = "none" ] \
+   && [ "$REG_SCOPE" = "mcp:invoke" ]; then
+  pass "DCR: client_name=Cursor -> client_id=cursor, public client, mcp:invoke scope"
+else
+  fail "DCR" "client_id=$REG_CLIENT_ID auth_method=$REG_AUTH_METHOD scope=$REG_SCOPE"
 fi
 
 # Probe 11: /oauth/token authorization_code path rejects an unknown code

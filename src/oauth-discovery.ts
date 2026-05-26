@@ -9,17 +9,26 @@
 //   - authorization_endpoint lives at https://verityskills.com/oauth/mcp/authorize
 //     (Phase 2; consent UI on Next.js)
 //   - token_endpoint lives at https://mcp.verityskills.com/oauth/token (this Worker)
+//   - registration_endpoint lives at https://mcp.verityskills.com/oauth/register
+//     (issue #25; allowlist-only, returns one of the pre-registered client_ids
+//     per RFC 7591 client information response shape)
 //
-// registration_endpoint is intentionally OMITTED per arch review R4: v1 is
-// allowlist-only; DCR-attempting clients fail-fast and fall through to manual
-// client_id entry.
+// Note: in v1 the registration endpoint was intentionally OMITTED per arch
+// review R4 with the assumption that DCR-attempting clients would fall
+// through to manual client_id entry. Cursor 1.x does not honour that
+// fallback and instead POSTs to a guessed default path, tombstoning the
+// connection after 5 consecutive 404s. Issue #25 added the endpoint as a
+// minimal allowlist-bridge so Cursor's mcp.json HTTP install path works
+// without a manual client_id paste step. See src/oauth-register.ts for
+// the implementation rationale.
 //
 // Kill-switch behavior: when MCP_OAUTH_KILL_SWITCH === 'on', the AS-metadata
-// doc omits OAuth-specific endpoints (`authorization_endpoint`, `token_endpoint`)
-// so DCR-attempting clients fail-fast and operators can disable OAuth at
-// runtime without redeploy. `vtk_*` user-key bearers continue to work.
-// The protected-resource doc still advertises the resource but reports no
-// authorization servers so MCP clients know not to attempt OAuth.
+// doc omits OAuth-specific endpoints (`authorization_endpoint`,
+// `token_endpoint`, `registration_endpoint`) so DCR-attempting clients
+// fail-fast and operators can disable OAuth at runtime without redeploy.
+// `vtk_*` user-key bearers continue to work. The protected-resource doc
+// still advertises the resource but reports no authorization servers so
+// MCP clients know not to attempt OAuth.
 
 import { CANONICAL_RESOURCE_URI } from './oauth-canonical';
 
@@ -29,6 +38,7 @@ export interface OauthDiscoveryEnv {
 
 const AUTHORIZATION_ENDPOINT = 'https://verityskills.com/oauth/mcp/authorize';
 const TOKEN_ENDPOINT = `${CANONICAL_RESOURCE_URI}/oauth/token`;
+const REGISTRATION_ENDPOINT = `${CANONICAL_RESOURCE_URI}/oauth/register`;
 const RESOURCE_METADATA_URL = `${CANONICAL_RESOURCE_URI}/.well-known/oauth-protected-resource`;
 const AS_METADATA_URL = `${CANONICAL_RESOURCE_URI}/.well-known/oauth-authorization-server`;
 
@@ -37,8 +47,9 @@ const AS_METADATA_URL = `${CANONICAL_RESOURCE_URI}/.well-known/oauth-authorizati
  *
  * Required keys (RFC 8414 §2): issuer, authorization_endpoint, token_endpoint,
  * response_types_supported, grant_types_supported, code_challenge_methods_supported,
- * scopes_supported. We intentionally omit `registration_endpoint` (R4) and
- * `jwks_uri` (opaque tokens; no JWT signature verification needed).
+ * scopes_supported. `registration_endpoint` advertised so RFC 7591 DCR clients
+ * (Cursor 1.x today) auto-discover the bridge endpoint. `jwks_uri` omitted
+ * (opaque tokens; no JWT signature verification needed).
  */
 export function buildAuthorizationServerMetadata(env: OauthDiscoveryEnv): Record<string, unknown> {
   const killed = env.MCP_OAUTH_KILL_SWITCH === 'on';
@@ -59,6 +70,7 @@ export function buildAuthorizationServerMetadata(env: OauthDiscoveryEnv): Record
   if (!killed) {
     doc['authorization_endpoint'] = AUTHORIZATION_ENDPOINT;
     doc['token_endpoint'] = TOKEN_ENDPOINT;
+    doc['registration_endpoint'] = REGISTRATION_ENDPOINT;
   }
 
   return doc;

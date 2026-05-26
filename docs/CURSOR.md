@@ -114,6 +114,12 @@ Content-Type negotiation on `POST /mcp`: the Worker emits `application/json` by 
 
 The challenge subsumes the prior lazy-OAuth model (anonymous `tools/list` → 401 on `tools/call`). Clients that previously authenticated lazily (Claude Desktop today) also handle the eager challenge cleanly because the OAuth response to a `401 + WWW-Authenticate` is identical in both cases.
 
+## Dynamic Client Registration bridge (issue #25)
+
+`POST /oauth/register` accepts an RFC 7591 client registration request and answers with a `201` carrying one of the pre-registered allowlist `client_id` values (`cursor`, `claude_desktop`, `chatgpt_desktop`, `gemini_cli`). The mapping uses a case-insensitive substring match on the inbound `client_name`; unknown clients fall through to `cursor`. The endpoint is advertised in the AS metadata via `registration_endpoint`.
+
+Why this exists: Cursor 1.x's `mcp.json` install path runs DCR before completing OAuth. Spec-correct behavior when `registration_endpoint` is absent (RFC 8414 §2) is to fall back to a configured `client_id`, but Cursor 1.x instead POSTs to a guessed default path. Without a 2xx response the MCP client FSM tombstones the connection after 5 consecutive 404s and the UI surfaces `The MCP server errored`. The bridge endpoint is safe because every v1 client is public (`token_endpoint_auth_method: none`) and the downstream `/authorize` endpoint re-validates the `client_id` against the consent UI allowlist regardless of what registration handed out. See `src/oauth-register.ts` for the full rationale.
+
 ## Cursor team awareness
 
 Cursor's Bugbot has already reviewed PRs in this repo (it found the iter-1 issues on PR #4). The Cursor team will recognize the project. After listing, ping `@anysphere` on X with the Angle 9 hook and tag `@cursor_ai`.
