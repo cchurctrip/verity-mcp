@@ -37,7 +37,13 @@ describe('GET /.well-known/oauth-authorization-server', () => {
     expect(res.headers.get('Content-Type')).toContain('application/json');
     const doc = (await res.json()) as Record<string, unknown>;
     expect(doc['issuer']).toBe('https://mcp.verityskills.com');
-    expect(doc['authorization_endpoint']).toBe('https://verityskills.com/oauth/mcp/authorize');
+    // Worker-hosted authorize entry point (not the consent UI URL): the
+    // Worker normalizes the `resource` param before 302-ing to
+    // https://verityskills.com/oauth/mcp/authorize so the consent UI's
+    // strict-equality v1 allowlist matches even when the client sends
+    // the trailing-slash form `https://mcp.verityskills.com/`. See
+    // oauth-discovery.ts. Issue #25 part 6.
+    expect(doc['authorization_endpoint']).toBe('https://mcp.verityskills.com/authorize');
     expect(doc['token_endpoint']).toBe('https://mcp.verityskills.com/oauth/token');
     expect(doc['code_challenge_methods_supported']).toEqual(['S256']);
     expect(doc['scopes_supported']).toEqual(['mcp:invoke']);

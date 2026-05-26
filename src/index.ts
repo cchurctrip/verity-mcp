@@ -179,19 +179,27 @@ const handler = {
     }
 
     // GET /authorize: 302 redirect to the consent UI on the Verity Next.js
-    // origin, preserving every query param. The discovery doc
-    // (/.well-known/oauth-authorization-server) correctly advertises
-    // `authorization_endpoint: https://verityskills.com/oauth/mcp/authorize`,
-    // but real MCP clients (Claude Desktop confirmed 2026-05-25; Cursor +
-    // ChatGPT Desktop + Gemini CLI suspected on same pattern) construct
-    // the authorize URL as `<server_url_host>/authorize` instead of
-    // honoring the metadata. This same-host redirect closes the gap
-    // without restructuring the consent UI cross-host split. State,
-    // code_challenge, code_challenge_method, redirect_uri, response_type,
-    // scope, resource, and client_id all pass through untouched; the
-    // user's browser then lands on the canonical consent URL on
-    // verityskills.com where the magic-link sign-in flow + consent
-    // approval happens per Phase 2.
+    // origin, preserving every query param after normalizing the
+    // `resource` param to the canonical no-trailing-slash form. Every
+    // OAuth-capable MCP client funnels through here now (#25 part 6):
+    //   - Spec-conformant clients (mcp-remote, the official
+    //     @modelcontextprotocol/sdk, Cursor 1.x via mcp-remote, Claude
+    //     Code 0.x) honor `authorization_endpoint` from the discovery
+    //     doc, which we point at this Worker route.
+    //   - Spec-loose clients (Claude Desktop confirmed 2026-05-25; some
+    //     paths in Cursor 1.x + ChatGPT Desktop + Gemini CLI) construct
+    //     the authorize URL as `<server_url_host>/authorize` and ignore
+    //     the metadata. Same route, same handler.
+    // The normalization step matters because the WHATWG URL parser
+    // (used by the SDK to build the authorize URL) ALWAYS adds a
+    // trailing slash to `https://mcp.verityskills.com`, so SDK clients
+    // emit `resource=https://mcp.verityskills.com/` which the consent
+    // UI's strict-equality v1 allowlist then rejects with "Connection
+    // blocked / resource must be 'https://mcp.verityskills.com'". The
+    // looser canonical comparator below catches that case (and the
+    // other RFC 3986 §6 equivalent forms: lowercase host, default
+    // port, mixed case) without weakening the downstream audience
+    // check on tokens.
     //
     // Gated by MCP_OAUTH_KILL_SWITCH per parity with the discovery doc
     // (which omits authorization_endpoint when on) and /oauth/token
