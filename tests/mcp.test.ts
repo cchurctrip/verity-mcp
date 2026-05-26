@@ -192,6 +192,28 @@ describe('buildToolsListResult', () => {
     expect([...noOutputSchema].sort()).toEqual(['coordination-heat', 'cross-check-alert', 'disinfo-alert']);
   });
 
+  it('every outputSchema has `type: "object"` at the ROOT (MCP SDK ToolSchema requires this literal; #25 part 8)', () => {
+    // The official @modelcontextprotocol/sdk ToolSchema (Zod) declares
+    // `outputSchema.type = literal("object")`. mcp-remote, Cursor 1.x, and
+    // Claude Desktop all parse tools/list with this schema and DROP the
+    // entire response if any tool's outputSchema fails validation -- the
+    // client then surfaces zero tools even though the connection is
+    // healthy. The discriminator may sit at the root alongside `type`
+    // (`.catchall(unknown())` lets `oneOf` / `anyOf` pass through), but
+    // `type: "object"` MUST be present. A 2026-05-26 deploy that
+    // omitted `type` on verity-score's outputSchema caused exactly this
+    // failure end-to-end despite a fully working OAuth chain.
+    const { tools } = buildToolsListResult();
+    for (const t of tools) {
+      if (!('outputSchema' in t)) continue;
+      const schema = t.outputSchema as Record<string, unknown>;
+      expect(
+        schema['type'],
+        `tool ${t.name}: outputSchema.type must be literal "object" (MCP SDK requirement)`,
+      ).toBe('object');
+    }
+  });
+
   it('does NOT expose upstreamPath through tools/list (proxy detail stays internal)', () => {
     const { tools } = buildToolsListResult();
     for (const t of tools) {
