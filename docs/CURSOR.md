@@ -1,111 +1,199 @@
-# Cursor Directory + Cursor Desktop install
+# Verity MCP Server Setup for Cursor
 
-[Cursor](https://cursor.com) ships native MCP support. Two listings to pursue: their public Directory (discovery) and a one-paste config snippet (install). Cursor also supports OAuth 2.1 install for end users who prefer a sign-in flow over pasting an API key.
+Verity's MCP server connects to Cursor via OAuth 2.1, end-user clicks-only install once configured. Verified working with Cursor's OAuth picker as of 2026-05.
 
-## OAuth via Cursor MCP settings (recommended for end users)
+## Quick Setup (2 minutes)
 
-Cursor's MCP install flow accepts OAuth 2.1 servers. In Cursor: Settings -> Cursor Settings -> MCP -> Add new MCP server. Pick the OAuth option and paste:
+### Step 1: Add to Cursor Configuration
 
-| Field | Value |
-|---|---|
-| Server URL | `https://mcp.verityskills.com/mcp` |
-| Discovery URL | `https://mcp.verityskills.com/.well-known/oauth-authorization-server` |
-| Client ID | `cursor` |
-| Client Secret | leave empty |
-
-Cursor opens the consent screen at `https://verityskills.com/oauth/mcp/authorize` in your default browser. Sign in via the magic link delivered to your inbox. Approve the consent. Cursor receives the OAuth token and lists the six Verity tools.
-
-Cursor uses a loopback callback (`http://localhost:<port>/oauth/callback`) per RFC 8252 §7.3. The Worker accepts any localhost port at validation time (the `client_id=cursor` row in the pre-registered allowlist carries the sentinel `http://localhost:0/oauth/callback`).
-
-Notes:
-- The `client_id` value (`cursor`) is a fixed string from v1's pre-registered allowlist.
-- Tokens are short-lived (1 hour access, 30 day refresh, automatic rotation per RFC 6749).
-- Tools that gate on Pro or Fund tier still gate; OAuth grants the existing entitlement, it does not upgrade you.
-
-## Cursor Directory submission
-
-Cursor maintains a public listing at https://cursor.directory/mcp. Their submission flow:
-
-1. Open a PR to https://github.com/cursor-community/awesome-mcp (or whichever upstream they currently use; check `cursor.directory` for the active list).
-2. Add an entry under the appropriate category (suggested: `finance` or `research`).
-
-Entry format (current as of 2026-05):
-
-```markdown
-### Verity
-
-Coordination, market integrity, and disinformation signals for AI trading
-agents. Six callable skills detect coordinated activity, score market subjects,
-and flag manipulation patterns. Pre-trade integrity check for AI workflows.
-
-- **URL:** https://mcp.verityskills.com/mcp
-- **Repo:** https://github.com/cchurctrip/verity-mcp
-- **Auth:** Bearer token at https://verityskills.com/account/api-keys (every skill)
-- **Anonymous tools:** none
-- **Categories:** finance, research, data
-```
-
-## Cursor Desktop install snippet
-
-Cursor reads `mcp.json` for tool definitions. Two ways to share:
-
-### Option A: One-click install URL (best UX)
-
-Cursor supports `cursor://` deep links. Build the install URL:
-
-```
-cursor://mcp/install?name=verity&url=https://mcp.verityskills.com/mcp
-```
-
-Embed this as a button on `verityskills.com/skills`:
-
-```html
-<a href="cursor://mcp/install?name=verity&url=https://mcp.verityskills.com/mcp">
-  <img src="https://verityskills.com/badges/add-to-cursor.png" alt="Add to Cursor">
-</a>
-```
-
-The user clicks the badge, Cursor prompts for confirmation, the server is added.
-
-### Option B: Manual config
-
-Add to `~/.cursor/mcp.json`:
+Add this to your `~/.cursor/mcp.json` file (create it if it doesn't exist):
 
 ```json
 {
   "mcpServers": {
     "verity": {
       "url": "https://mcp.verityskills.com/mcp",
-      "headers": {
-        "Authorization": "Bearer vtk_<your-token>"
+      "type": "http",
+      "auth": {
+        "type": "oauth",
+        "authorizationUrl": "https://mcp.verityskills.com/authorize",
+        "tokenUrl": "https://mcp.verityskills.com/oauth/token",
+        "clientId": "cursor",
+        "scopes": ["mcp:invoke"],
+        "resource": "https://mcp.verityskills.com"
       }
     }
   }
 }
 ```
 
-Restart Cursor. Open settings -> MCP. Verity should appear with 6 tools listed. Test by typing `@verity-score NVDA` in chat.
+If you already have other MCP servers, just add the `"verity"` section inside `"mcpServers"`.
 
-## Transports available
+### Step 2: Restart Cursor
 
-Cursor connects via Streamable HTTP at `POST /mcp` (MCP 2025-03-26). The Worker also serves a legacy SSE bridge at `GET /sse` + `POST /sse` for clients that need EventSource handshake (Perplexity Comet today). Cursor does not need the legacy SSE path; the snippet above hits Streamable HTTP automatically. The server returns `Content-Type: application/json` for Cursor requests (Cursor's `mcp.json` direct-HTTP path does not send `text/event-stream` in Accept), and `Content-Type: text/event-stream` only when the client requests it.
+Completely quit and restart Cursor (not just reload window).
 
-## Cursor team awareness
+### Step 3: Authenticate
 
-Cursor's Bugbot has already reviewed PRs in this repo (it found the iter-1 issues on PR #4). The Cursor team will recognize the project. After listing, ping `@anysphere` on X with the Angle 9 hook and tag `@cursor_ai`.
+OAuth authentication triggers automatically when you first use a Verity tool that requires auth (see below for the four auth-required tools).
 
-## What about Anthropic's MCP directory?
+To trigger authentication:
 
-Anthropic does not yet publish a curated MCP directory of their own. The Claude Desktop install path is via `claude_desktop_config.json` (see `docs/CLAUDE_DESKTOP.md` in this repo for the canonical snippet). The closest official surface is the `@modelcontextprotocol/registry` registry: a JSON file in the modelcontextprotocol/registry GitHub repo. PR to that repo with the same payload as the Smithery submission.
+1. Open Cursor Agent chat
+2. Type: `Use coordination-heat on GME`
+3. A browser window opens automatically
+4. Sign in with your email (magic link delivered to your inbox)
+5. Approve the connection
+6. Browser redirects back to Cursor automatically via the localhost callback
+7. Done; your command runs with the issued OAuth token
 
-## Validation before submitting
+---
 
-Test the install path end-to-end before any public listing:
+## Available Tools
 
-1. Fresh Cursor install on a clean machine.
-2. Paste the `mcp.json` snippet.
-3. Restart Cursor.
-4. Invoke `verity-score` from chat.
-5. Verify the response is the structured upstream payload.
+After authentication, you can use these tools in Agent chat. Four require OAuth; two have an anonymous-fallback path that returns zero-stub data without a token.
 
-If the install fails for any reason (auth header not propagated, JSON-RPC framing rejected, tool not appearing in palette), file an issue against the verity-mcp repo before pushing the Cursor Directory PR. A broken listing is worse than no listing.
+### Auth-required tools (force OAuth on first call)
+
+- coordination-heat: leaderboards of coordinated activity and sentiment manipulation across seven tabs (most-coordinated, sentiment-flip, cross-platform-velocity, suspect-pump, suspect-fud, verity-score-movers, and an alphabetical fallback).
+  - Example: `Use coordination-heat on GME`
+- verity-scan: subject-level scan that returns the most-recent signals for a given ticker or topic.
+  - Example: `Run verity-scan on $NVDA`
+- cross-check-alert: cross-reference a single claim across the live signals stream and prediction-market data.
+  - Example: `Cross-check this alert: TSLA pumping`
+- disinfo-alert: detect coordinated disinformation patterns on a specific narrative.
+  - Example: `Disinfo-alert on the latest Tesla earnings narrative`
+
+### Tools with anonymous fallback (will return zero-stub data without OAuth)
+
+- verity-score: trust and integrity score for a ticker. Anonymous fallback returns `score=0, "Verity Score within normal range"`; signed-in callers get the real score breakdown.
+  - Example: `Use verity-score on NVDA`
+- morning-brief: daily roundup of overnight signals across your watchlist. Anonymous fallback returns zero-stub rows; signed-in callers get the real brief.
+  - Example: `Show me the verity morning brief for NVDA, TSLA, GME`
+
+To force OAuth at install time, call one of the four auth-required tools first.
+
+---
+
+## Troubleshooting
+
+### OAuth window does not open
+
+- Make sure you have completely restarted Cursor (not just reloaded the window)
+- Try running a coordination-heat or verity-scan command to trigger authentication manually
+- Check MCP logs: press `Cmd + Shift + U` (Mac) or `Ctrl + Shift + U` (Windows/Linux), then select "MCP Logs"
+
+### "Verity server not available" error
+
+- Verify your `mcp.json` configuration matches the snippet above exactly
+- Check that you can reach `https://mcp.verityskills.com/health` from your browser (returns JSON)
+- Try removing and re-adding the configuration
+
+### Tools not showing up
+
+- Open Settings > Tools & MCP
+- Look for "verity" in the list
+- Make sure it is toggled ON
+- Status indicator should be green after authentication completes
+
+### Auth completes but tools still 401
+
+- Token may have expired (1 hour TTL). Cursor handles refresh automatically; if it does not, restart Cursor.
+- If 401 persists, check Cursor's MCP Logs for the exact request/response.
+
+---
+
+## Example Workflows
+
+### Stock market coordination analysis
+
+```
+Use coordination-heat on GME
+Use coordination-heat on AMC
+Compare coordination patterns between both
+```
+
+### News verification
+
+```
+Verity-scan: "Breaking news about company X merger"
+Cross-check-alert: this news across sources
+Use verity-score on the source ticker
+```
+
+### Daily monitoring
+
+```
+Show me today's morning brief for my watchlist
+Disinfo-alert on the trending Tesla narrative
+```
+
+---
+
+## OAuth specifics (for client implementers)
+
+Verity's OAuth surface is MCP 2025-06-18 + OAuth 2.1 + RFC 8414/9728 conformant. Verified by the 12-probe harness in `scripts/multi-client-probe.sh`. Specifics relevant to a Cursor-style loopback client:
+
+- Authorization URL: `https://mcp.verityskills.com/authorize`
+- Token URL: `https://mcp.verityskills.com/oauth/token`
+- Client ID (pre-registered, no DCR in v1): `cursor`
+- Client Secret: empty (public client; PKCE-only)
+- Scopes: `mcp:invoke`
+- Resource: `https://mcp.verityskills.com`
+- PKCE: S256 required (plain method rejected at the DB CHECK constraint)
+- Redirect URI: `http://localhost:<any-port>/oauth/callback`; pre-registered seed allowlists `http://localhost:0/oauth/callback` for `client_id=cursor` per RFC 8252 section 7.3 (the `:0` is a wildcard matching any numeric port)
+
+Discovery (auto-flow):
+- Protected Resource Metadata: `https://mcp.verityskills.com/.well-known/oauth-protected-resource`
+- Authorization Server Metadata: `https://mcp.verityskills.com/.well-known/oauth-authorization-server`
+
+Tokens:
+- Access tokens prefixed `vto_*`, hashed SHA-256 at rest, 1 hour TTL
+- Refresh tokens, hashed at rest, 30 day TTL, rotation on every redeem
+- Family revocation on replay per RFC 6819 section 5.2.2.3
+
+---
+
+## Cursor Directory submission (separate distribution channel)
+
+Cursor maintains a public listing at https://cursor.directory/mcp. Submitting Verity there means any Cursor user can find it via the in-app marketplace and install with one click.
+
+1. Open a PR to the Cursor directory's listing repo (check `cursor.directory` for the current upstream).
+2. Add an entry under category `finance` or `research` with this payload:
+
+```markdown
+### Verity
+
+Coordination, market integrity, and disinformation signals for AI
+trading agents. Six callable skills detect coordinated activity,
+score market subjects, and flag manipulation patterns. Pre-trade
+integrity check for AI workflows.
+
+- URL: https://mcp.verityskills.com/mcp
+- Repo: https://github.com/cchurctrip/verity-mcp
+- Auth: OAuth 2.1 (recommended) or Bearer token from https://verityskills.com/account/api-keys
+- Categories: finance, research, data
+```
+
+This is one of the marketplace submissions tracked under VRT-148; same payload applies (with format edits) to Smithery and the modelcontextprotocol/registry.
+
+---
+
+## Support
+
+- Documentation: https://github.com/cchurctrip/verity-mcp
+- Issues: report on GitHub
+- Logs: access via Cursor's MCP Logs panel (`Cmd + Shift + U` on Mac)
+
+---
+
+## Security and Privacy
+
+- OAuth tokens are stored securely by Cursor's MCP credential cache
+- Access tokens expire after 1 hour
+- Refresh tokens are valid for 30 days; rotated on every refresh
+- No API keys or credentials live in the configuration file
+- PKCE S256 enforced end to end
+- Verity's Sentry integration scrubs `vto_*` token patterns and OAuth-credential body keys from breadcrumbs before sending events
+
+For the API-key install path (recommended if Cursor's OAuth picker is unavailable on your build), see [Path 1 in CLAUDE_DESKTOP.md](./CLAUDE_DESKTOP.md); same JSON pattern works in Cursor's `mcp.json`.
