@@ -36,7 +36,21 @@ export interface OauthDiscoveryEnv {
   MCP_OAUTH_KILL_SWITCH?: string;
 }
 
-const AUTHORIZATION_ENDPOINT = 'https://verityskills.com/oauth/mcp/authorize';
+// Worker-hosted authorize entry point. The Worker 302s to the cross-host
+// consent UI at https://verityskills.com/oauth/mcp/authorize, but only
+// AFTER normalizing the `resource` param (strips trailing slash,
+// lowercases host, etc.) and defaulting v1-allowlisted scope/resource/
+// code_challenge_method values. Advertising the consent UI directly here
+// would bypass that normalization for spec-conformant clients
+// (mcp-remote, the official @modelcontextprotocol/sdk, Cursor 1.x in
+// some paths) that honor `authorization_endpoint` literally instead of
+// constructing it from the server URL. Those clients send
+// `resource=https://mcp.verityskills.com/` (trailing slash; produced by
+// `new URL(...).href`), which the consent UI's strict-equality v1
+// allowlist then rejects with "Connection blocked / resource must be
+// 'https://mcp.verityskills.com'". Pointing every client at the Worker
+// closes that gap. Issue #25 part 6.
+const AUTHORIZATION_ENDPOINT = `${CANONICAL_RESOURCE_URI}/authorize`;
 const TOKEN_ENDPOINT = `${CANONICAL_RESOURCE_URI}/oauth/token`;
 const REGISTRATION_ENDPOINT = `${CANONICAL_RESOURCE_URI}/oauth/register`;
 const RESOURCE_METADATA_URL = `${CANONICAL_RESOURCE_URI}/.well-known/oauth-protected-resource`;

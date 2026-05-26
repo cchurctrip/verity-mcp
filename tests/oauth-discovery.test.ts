@@ -14,7 +14,12 @@ describe('buildAuthorizationServerMetadata (RFC 8414)', () => {
   it('returns spec-required keys with the right values', () => {
     const doc = buildAuthorizationServerMetadata({});
     expect(doc['issuer']).toBe('https://mcp.verityskills.com');
-    expect(doc['authorization_endpoint']).toBe('https://verityskills.com/oauth/mcp/authorize');
+    // authorization_endpoint points at the Worker (not the cross-host
+    // consent UI directly) so SDK-honoring clients flow through the
+    // Worker normalization layer that strips the trailing slash on the
+    // `resource` param. See oauth-discovery.ts for the full story and
+    // src/index.ts for the GET /authorize handler. Issue #25 part 6.
+    expect(doc['authorization_endpoint']).toBe('https://mcp.verityskills.com/authorize');
     expect(doc['token_endpoint']).toBe('https://mcp.verityskills.com/oauth/token');
     expect(doc['response_types_supported']).toEqual(['code']);
     expect(doc['grant_types_supported']).toEqual(['authorization_code', 'refresh_token']);
