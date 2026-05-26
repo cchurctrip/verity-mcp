@@ -275,12 +275,55 @@ describe('handleOauthToken authorization_code grant', () => {
   });
 
   it('non-canonical resource returns invalid_target without DB lookup', async () => {
+    // Wrong host. A truly non-equivalent form. The trailing-slash form
+    // `https://mcp.verityskills.com/` is now accepted as canonical-
+    // equivalent (#25 part 7) because spec-conformant clients (mcp-remote,
+    // the @modelcontextprotocol/sdk, Claude Desktop) emit it; see the
+    // separate "accepts trailing-slash form" test below.
     const { fetchImpl, calls } = makeFetchStub([]);
     const res = await handleOauthToken(
       tokenReq(
         formBody({
           grant_type: 'authorization_code',
           code: 'x',
+          code_verifier: 'a'.repeat(64),
+          redirect_uri: 'http://localhost:0/oauth/callback',
+          resource: 'https://evil.example.com',
+          client_id: 'claude_desktop',
+        }),
+      ),
+      baseEnv,
+      fetchImpl,
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toBe('invalid_target');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('accepts trailing-slash resource form (mcp-remote / @modelcontextprotocol/sdk emit this; #25 part 7)', async () => {
+    // SDK clients construct the authorize URL via `new URL(serverUrl).href`
+    // which always normalizes origin-only URLs with a trailing slash. We
+    // accept the equivalent form here and normalize to the canonical
+    // constant downstream (storage byte-equality preserved). Without this
+    // the token exchange fails with InvalidTargetError after a successful
+    // consent and burns the user's authorization code.
+    //
+    // Stub returns `[]` for any call so we get past the resource check and
+    // land on invalid_grant (code not found), proving the resource check
+    // accepted the trailing-slash form. Pre-fix the same call returned
+    // invalid_target before any DB lookup happened.
+    let callCount = 0;
+    const fetchImpl: typeof fetch = async () => {
+      callCount += 1;
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const res = await handleOauthToken(
+      tokenReq(
+        formBody({
+          grant_type: 'authorization_code',
+          // Unique-per-test code value to avoid the per-code rate limit
+          // cache (noteRequestForCode) sharing state between tests.
+          code: 'trailing-slash-equiv-fresh-code',
           code_verifier: 'a'.repeat(64),
           redirect_uri: 'http://localhost:0/oauth/callback',
           resource: 'https://mcp.verityskills.com/',
@@ -291,8 +334,8 @@ describe('handleOauthToken authorization_code grant', () => {
       fetchImpl,
     );
     expect(res.status).toBe(400);
-    expect((res.body as { error: string }).error).toBe('invalid_target');
-    expect(calls).toHaveLength(0);
+    expect((res.body as { error: string }).error).toBe('invalid_grant');
+    expect(callCount).toBeGreaterThanOrEqual(1);
   });
 
   it('compare-and-set redemption: returns invalid_grant when the UPDATE affects 0 rows (race loser)', async () => {
