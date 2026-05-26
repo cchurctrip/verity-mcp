@@ -67,14 +67,19 @@ describe('GET /.well-known/oauth-authorization-server', () => {
 });
 
 describe('GET /.well-known/oauth-protected-resource', () => {
-  it('returns RFC 9728 metadata with the canonical resource + AS pointer', async () => {
+  it('returns RFC 9728 metadata with the canonical resource + AS issuer URL', async () => {
+    // The `authorization_servers` array contains the AS *issuer*
+    // identifier (RFC 8414 §2), not the AS metadata URL. SDK clients
+    // (mcp-remote, Cursor, Claude Code) call
+    // discoverAuthorizationServerMetadata() against this value and
+    // construct `<issuer>/.well-known/oauth-authorization-server`
+    // themselves. Returning a metadata URL here causes a
+    // double-prefix 404 and breaks the flow. Issue #25 part 5.
     const res = await SELF.fetch('http://example.com/.well-known/oauth-protected-resource');
     expect(res.status).toBe(200);
     const doc = (await res.json()) as Record<string, unknown>;
     expect(doc['resource']).toBe('https://mcp.verityskills.com');
-    expect(doc['authorization_servers']).toEqual([
-      'https://mcp.verityskills.com/.well-known/oauth-authorization-server',
-    ]);
+    expect(doc['authorization_servers']).toEqual(['https://mcp.verityskills.com']);
     expect(doc['bearer_methods_supported']).toEqual(['header']);
   });
 

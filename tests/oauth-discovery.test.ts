@@ -52,12 +52,15 @@ describe('buildAuthorizationServerMetadata (RFC 8414)', () => {
 });
 
 describe('buildProtectedResourceMetadata (RFC 9728)', () => {
-  it('returns canonical resource + authorization_servers pointer + bearer header method', () => {
+  it('returns canonical resource + AS issuer URL + bearer header method', () => {
+    // authorization_servers MUST contain the AS *issuer* identifier (RFC 8414
+    // §2), not the metadata URL. SDK clients run their own
+    // /.well-known/oauth-authorization-server lookup against this value, so
+    // handing back a metadata URL causes a double-prefix 404 and the OAuth
+    // flow never starts. Issue #25 part 5.
     const doc = buildProtectedResourceMetadata({});
     expect(doc['resource']).toBe('https://mcp.verityskills.com');
-    expect(doc['authorization_servers']).toEqual([
-      'https://mcp.verityskills.com/.well-known/oauth-authorization-server',
-    ]);
+    expect(doc['authorization_servers']).toEqual(['https://mcp.verityskills.com']);
     expect(doc['bearer_methods_supported']).toEqual(['header']);
   });
 

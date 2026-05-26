@@ -68,13 +68,21 @@ AS_REG=$(printf '%s' "$AS_DOC" | jq -r '.registration_endpoint // empty' 2>/dev/
 AS_PKCE=$(printf '%s' "$AS_DOC" | jq -c '.code_challenge_methods_supported // empty' 2>/dev/null || echo "")
 AS_SCOPES=$(printf '%s' "$AS_DOC" | jq -c '.scopes_supported // empty' 2>/dev/null || echo "")
 PR_RES=$(printf '%s' "$PR_DOC" | jq -r '.resource // empty' 2>/dev/null || echo "")
+# Issue #25 part 5: authorization_servers MUST be the AS issuer identifier
+# (host-only URL), NOT the metadata URL. The MCP TS SDK runs its own
+# /.well-known/oauth-authorization-server lookup against this value, so a
+# metadata URL causes a double-prefix 404 ("/oauth-authorization-server/.well
+# -known/oauth-authorization-server") and the OAuth flow never starts.
+PR_AS=$(printf '%s' "$PR_DOC" | jq -c '.authorization_servers // empty' 2>/dev/null || echo "")
+EXPECT_AS="[\"$BASE_URL\"]"
 if [ "$AS_REG" = "$BASE_URL/oauth/register" ] \
    && [ "$AS_PKCE" = '["S256"]' ] \
    && printf '%s' "$AS_SCOPES" | grep -q 'mcp:invoke' \
-   && [ "$PR_RES" = "$BASE_URL" ]; then
-  pass "discovery: registration_endpoint advertised, S256-only, mcp:invoke present, resource matches"
+   && [ "$PR_RES" = "$BASE_URL" ] \
+   && [ "$PR_AS" = "$EXPECT_AS" ]; then
+  pass "discovery: registration_endpoint advertised, S256-only, mcp:invoke present, resource matches, authorization_servers is issuer URL"
 else
-  fail "discovery" "reg=$AS_REG pkce=$AS_PKCE scopes=$AS_SCOPES pr_resource=$PR_RES"
+  fail "discovery" "reg=$AS_REG pkce=$AS_PKCE scopes=$AS_SCOPES pr_resource=$PR_RES pr_authservers=$PR_AS expected_authservers=$EXPECT_AS"
 fi
 
 # Probe 10c: path-scoped metadata URLs (MCP 2025-06-18 §2.3 / RFC 9728 §3.1).

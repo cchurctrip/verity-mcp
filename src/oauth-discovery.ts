@@ -40,7 +40,6 @@ const AUTHORIZATION_ENDPOINT = 'https://verityskills.com/oauth/mcp/authorize';
 const TOKEN_ENDPOINT = `${CANONICAL_RESOURCE_URI}/oauth/token`;
 const REGISTRATION_ENDPOINT = `${CANONICAL_RESOURCE_URI}/oauth/register`;
 const RESOURCE_METADATA_URL = `${CANONICAL_RESOURCE_URI}/.well-known/oauth-protected-resource`;
-const AS_METADATA_URL = `${CANONICAL_RESOURCE_URI}/.well-known/oauth-authorization-server`;
 
 /**
  * RFC 8414 §3.1 Authorization Server Metadata.
@@ -83,6 +82,30 @@ export function buildAuthorizationServerMetadata(env: OauthDiscoveryEnv): Record
  * `bearer_methods_supported: ["header"]` per RFC 6750 §2.1 (Authorization
  * request header).
  *
+ * `authorization_servers` carries the AS *issuer* identifier (RFC 8414 §2
+ * `issuer` value), NOT the AS metadata URL. The MCP TypeScript SDK
+ * (mcp-remote, Cursor 1.x, Claude Code 0.x, the official @modelcontextprotocol
+ * /sdk) takes `authorization_servers[0]` and runs its OWN buildDiscoveryUrls()
+ * against it: for a URL with no path it tries
+ * `<origin>/.well-known/oauth-authorization-server`; for a URL with a path
+ * it tries `<origin>/.well-known/oauth-authorization-server<path>` plus
+ * OIDC variants. If we hand back the metadata URL itself the SDK
+ * double-prefixes — `/.well-known/oauth-authorization-server/.well-known/
+ * oauth-authorization-server` — gets 404 on every candidate, fails open
+ * with `metadata = undefined`, and then `registerClient(asUrl, { metadata:
+ * undefined })` falls back to `new URL("/register", asUrl)` which resolves
+ * to `https://mcp.verityskills.com/register` (also 404 here). The 404 the
+ * client logs is the DCR fallback, not the metadata discovery itself.
+ *
+ * The PostHog reference server gets this right: its protected-resource
+ * metadata returns `authorization_servers: ["https://oauth.posthog.com"]`
+ * (issuer URL with no path) and SDK clients construct
+ * `https://oauth.posthog.com/.well-known/oauth-authorization-server`
+ * correctly.
+ *
+ * For Verity the AS is colocated with the resource server on the same
+ * origin so the issuer is just `CANONICAL_RESOURCE_URI`. Issue #25 part 5.
+ *
  * Kill-switch: clears `authorization_servers` so MCP clients know not to
  * attempt OAuth and fall back to the bearer path documented in the manifest.
  */
@@ -91,7 +114,7 @@ export function buildProtectedResourceMetadata(env: OauthDiscoveryEnv): Record<s
 
   return {
     resource: CANONICAL_RESOURCE_URI,
-    authorization_servers: killed ? [] : [AS_METADATA_URL],
+    authorization_servers: killed ? [] : [CANONICAL_RESOURCE_URI],
     bearer_methods_supported: ['header'],
     resource_documentation: 'https://verityskills.com/skills',
   };
