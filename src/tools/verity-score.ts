@@ -17,8 +17,18 @@ export const verityScore = {
     additionalProperties: false,
   },
   // VRT-160: discriminated union on `status` per VRT-159. Consumers branch on
-  // status to handle every success case exhaustively.
+  // status to handle every success case exhaustively. `type: "object"` lives at
+  // the ROOT alongside `oneOf` because the official @modelcontextprotocol/sdk
+  // ToolSchema (chunk-65X3S4HB.js:11857 in mcp-remote 0.1.37; identical Zod
+  // schema in Cursor 1.x's MCP client and Claude Desktop) requires
+  // `outputSchema.type === "object"` as a literal at the root. Without it,
+  // strict Zod validation drops the entire tools/list response and the client
+  // surfaces zero tools even though the connection itself is healthy. The
+  // outer schema is `.catchall(unknown())` so the `oneOf` discriminator passes
+  // through untouched and JSON Schema applies it as an implicit allOf against
+  // the base `type: "object"`. Issue #25 part 8 (Cursor 0-tools regression).
   outputSchema: {
+    type: 'object',
     oneOf: [
       {
         type: 'object',
