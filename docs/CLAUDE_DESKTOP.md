@@ -2,35 +2,18 @@
 
 Two install paths:
 
-1. **OAuth via UI Connector** (recommended for end users; one-click sign-in via a magic link, no API key to manage).
-2. **Direct bearer via config file** (recommended for automation, CI, and power users; pinned `vtk_` token).
+1. **Direct bearer via config file** (recommended for everyone today; pinned `vtk_` API key; works reliably in every Claude Desktop build).
+2. **OAuth via UI Connector** (preview; one-click sign-in; consent flow works end-to-end on the Verity side but the post-consent token exchange depends on Anthropic's Claude Desktop OAuth picker which is incomplete for third-party MCP servers as of 2026-05; documented below for when Anthropic ships the fix).
 
 Both paths reach the same six tools at `https://mcp.verityskills.com`. Pick one or the other for a given install; mixing them just doubles the connectors.
 
-## Path 1: OAuth via the UI Connector (Claude Desktop 1.8500+)
+## Path 1 (recommended): direct config snippet
 
-Claude Desktop's UI Connector flow uses OAuth 2.1 (MCP 2025-06-18). Open Settings -> Connectors -> Add custom connector. Paste:
+This is the install path every Verity user should follow today. ~60 seconds end-to-end.
 
-| Field | Value |
-|---|---|
-| Server URL | `https://mcp.verityskills.com/mcp` |
-| Discovery URL | `https://mcp.verityskills.com/.well-known/oauth-authorization-server` |
-| Client ID | `claude_desktop` |
-| Client Secret | leave empty |
+**Step 1**: Issue your Verity API key at https://verityskills.com/account/api-keys (click **Reveal** if you already have one, or **Generate** for a fresh one). The key looks like `vtk_<64 hex chars>`. Copy it.
 
-Click Connect. Claude Desktop opens the consent screen at `https://verityskills.com/oauth/mcp/authorize` in your browser. Sign in via the magic link delivered to your inbox (the first install creates a Verity account if needed; existing accounts sign in to the same email). Approve the consent. Claude Desktop receives the OAuth token and registers the six tools.
-
-Verify by typing `/verity` in a new Claude conversation, or by asking "Use verity-score on NVDA".
-
-Notes:
-- The `client_id` value (`claude_desktop`) is a fixed string; v1 of the OAuth surface ships a pre-registered allowlist of four clients. RFC 7591 dynamic client registration is deferred.
-- The consent screen lives on `https://verityskills.com`; the URL bar is visible so you can confirm you are signing in to Verity, not a phishing page.
-- Tokens are short-lived (1 hour access, 30 day refresh, automatic rotation per RFC 6749). Re-signing in is rare; Claude Desktop handles the refresh transparently.
-- Tools that need a Pro or Fund tier (e.g. unlimited verity-score calls) still gate on tier; the OAuth flow grants access to your account's existing entitlement, it does not upgrade you.
-
-## Path 2: Direct config snippet (native HTTP, Claude Desktop 2026 builds)
-
-Paste into the JSON file's `mcpServers` block (create the object if it doesn't exist):
+**Step 2**: Open `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) in any text editor. If the file does not exist, create it with this content. If it already has an `mcpServers` block with other servers, add the `"verity"` entry inside that block:
 
 ```json
 {
@@ -39,18 +22,24 @@ Paste into the JSON file's `mcpServers` block (create the object if it doesn't e
       "type": "http",
       "url": "https://mcp.verityskills.com/mcp",
       "headers": {
-        "Authorization": "Bearer vtk_<your-token>"
+        "Authorization": "Bearer vtk_REPLACE_WITH_YOUR_TOKEN"
       }
     }
   }
 }
 ```
 
-Claude Desktop 2026 builds support `type: "http"` for direct Streamable HTTP MCP server connections, no proxy needed.
+Replace `vtk_REPLACE_WITH_YOUR_TOKEN` with the value from step 1. Save.
 
-## Fallback for older Claude Desktop builds (mcp-remote stdio bridge)
+**Step 3**: Fully quit Claude Desktop (Cmd-Q on macOS, right-click tray icon then Quit on Windows). Do not just close the window; you have to actually quit. Reopen.
 
-If `type: "http"` is rejected (older Claude Desktop, or a "no tools available" response after restart), use the `mcp-remote` stdio bridge to translate stdio MCP into HTTP MCP:
+**Step 4**: Open a new conversation. Type `/verity` to confirm the six tools loaded, or just ask conversationally: "Use verity-score on NVDA". Claude invokes the tool and returns the result.
+
+`type: "http"` is supported on Claude Desktop 2026 builds (native Streamable HTTP transport, no proxy). If your build rejects it, use the fallback below.
+
+### Fallback for older Claude Desktop builds (mcp-remote stdio bridge)
+
+If `type: "http"` is rejected (older Claude Desktop, or a "no tools available" response after restart), use the `mcp-remote` stdio bridge:
 
 ```json
 {
@@ -69,15 +58,31 @@ If `type: "http"` is rejected (older Claude Desktop, or a "no tools available" r
 }
 ```
 
-`mcp-remote` (from npm, package `mcp-remote`) is the standard stdio-to-HTTP bridge for MCP servers. The `--header` flag uses `Header:value` with no space after the colon to dodge yargs parsing.
+`mcp-remote` (npm package `mcp-remote`) is the standard stdio-to-HTTP MCP bridge. The `--header` flag uses `Header:value` with no space after the colon to dodge yargs parsing.
 
-Do NOT use `@modelcontextprotocol/server-fetch` here. That package provides a `fetch` tool (callable from inside any MCP client); it is not a bridge to a remote MCP server. Prior versions of this doc had the wrong snippet.
+Do NOT use `@modelcontextprotocol/server-fetch` here. That package provides a `fetch` tool (callable from inside any MCP client); it is not a bridge to a remote MCP server.
 
-## Verifying the install
+## Path 2 (preview): OAuth via the UI Connector
 
-Where to get `vtk_<your-token>`: https://verityskills.com/account/api-keys
+Claude Desktop 1.8500+ ships an OAuth 2.1 UI Connector flow (MCP 2025-06-18). The Verity OAuth surface implements that spec end-to-end: discovery endpoints, PKCE S256, RFC 8707 resource indicator, audience binding, refresh-token rotation with family revocation per RFC 6819. Verified live with the multi-client probe harness (`scripts/multi-client-probe.sh`, 12 of 12 pass against `mcp.verityskills.com`).
 
-Fully quit Claude Desktop (Cmd-Q on macOS, right-click tray icon then Quit on Windows) before relaunch. Open a new conversation. Type `/verity` to confirm the six tools are loaded, or just ask "Use verity-score on NVDA" and Claude will invoke the tool.
+In practice the flow stalls between consent approval and token redemption: Claude Desktop receives the OAuth code at `https://claude.ai/api/mcp/auth_callback?code=...&state=...` but does not call POST `/oauth/token` to redeem it. This is a known Anthropic-side gap as of 2026-05; the bug appears to affect third-party MCP server OAuth completion specifically. Once Anthropic ships the fix, this path becomes the recommended install for non-technical users (no JSON file editing).
+
+Configuration (for when the picker works):
+
+| Field | Value |
+|---|---|
+| Server URL | `https://mcp.verityskills.com/mcp` |
+| Client ID | `claude_desktop` |
+| Client Secret | leave empty |
+
+The consent screen lives on `https://verityskills.com/oauth/mcp/authorize`. Sign in via the magic link delivered to your inbox (cross-tab safe; the magic-link URL carries a signed return_to so any tab can complete the flow). Approve the consent. Claude Desktop receives the OAuth code via `claude.ai/api/mcp/auth_callback`.
+
+Notes:
+- The `client_id` value (`claude_desktop`) is a fixed string from v1's pre-registered allowlist (4 clients: Claude Desktop, ChatGPT Desktop, Cursor, Gemini CLI). RFC 7591 dynamic client registration is deferred to v2.
+- Tokens are short-lived (1 hour access, 30 day refresh, automatic rotation per RFC 6749).
+- Tools that need Pro or Fund tier still gate on tier; OAuth grants existing entitlement, does not upgrade you.
+- The same OAuth surface is the install path for any other MCP client (ChatGPT Desktop, Cursor, Gemini CLI) whose client-side OAuth completion works; those are not blocked on the Anthropic-side gap.
 
 ## Transports available
 
@@ -100,13 +105,14 @@ Anthropic does not yet support `claude://mcp/install` deep links. When they do, 
 
 Track Anthropic's MCP install-flow announcements at https://www.anthropic.com/news.
 
-## API key required for every skill
+## Tier gates apply to every tool call
 
-All six skills require a Verity API key. Issue one at https://verityskills.com/account/api-keys and configure it as the bearer token above. A request with no bearer (or a malformed one) returns 401 (INVALID_BEARER_FORMAT at the edge for a malformed header, or upstream UNAUTHORIZED when the header is absent).
+Every Verity skill requires an authenticated identity. A request with no bearer (or a malformed one) returns 401. A request with a valid bearer on a tier the account does not hold returns 402 with an `upgrade_url`.
 
 ## Troubleshooting
 
 - **Claude says "no tools available":** check the JSON is valid (no trailing commas) and Claude Desktop has been fully restarted, not just reloaded.
 - **All authenticated tools return 401:** verify the token starts with `vtk_` and contains no whitespace. The bearer regex is strict: `^Bearer vtk_[A-Za-z0-9]+$`.
-- **A tool returns 402:** trial cap reached. The response includes an `upgrade_url`; visit it to upgrade to Pro or Fund tier.
+- **A tool returns 402:** trial cap reached or tier insufficient. The response includes an `upgrade_url`; visit it to upgrade to Pro or Fund tier.
 - **The first call after a long idle returns slowly:** Cloudflare Worker cold start. First request on a new isolate takes 200-400ms; subsequent calls are sub-100ms.
+- **OAuth UI Connector adds Verity but tools never authenticate:** known Anthropic-side gap (see Path 2 above). Switch to Path 1 (direct config); same end result.
