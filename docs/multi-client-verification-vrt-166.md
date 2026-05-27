@@ -1,12 +1,13 @@
 # VRT-166 OAuth 2.1 multi-client verification
 
-**Status**: template; owner fills in after running each 4-client smoke.
+**Status**: Cursor PASS (2026-05-27T16:43Z), Claude Code PASS (2026-05-27T22:13Z); Claude Desktop, ChatGPT Desktop, Gemini CLI pending owner smoke.
 **Live deploy**: `mcp.verityskills.com`
-**Wrangler version ID**: `393bd974-62cd-42bd-b972-0a9977ece89a` (2026-05-25 Phase 1 OAuth deploy)
-**Worker commit (/health)**: `4dfbf2f798c7be58b04a4dd07ed18a1b3ac3da98` (the /health endpoint returns `commit: "unknown"` because the deploy did not inject `--var COMMIT_SHA`; the version ID above is the source of truth)
+**Wrangler version ID**: `2a3e962c-84ec-426e-afaf-f93aeb6470d4` (post-#36 `structuredContent` deploy verified live for the Cursor smoke; the Claude Code smoke at 2026-05-27T22:13Z hit the same Worker via OAuth).
+**Worker commit (/health)**: returns `commit: "unknown"`; `/health.commit` returns 404. Deploy script does not inject `--var COMMIT_SHA:$(git rev-parse HEAD)`. Wrangler version ID is the source of truth in the meantime. Filed as a follow-up (see bottom).
 **Spec**: `cchurctrip/verity` `mydocs/specs/2026-05-22_VRT-166_oauth-21-mcp-server.md`
 **Impl PRs**:
 - Phase 0 migrations: `cchurctrip/verity` #305 (merged 2026-05-22T15:52Z)
+- Phase 0 follow-up (Claude Code loopback callback path): `cchurctrip/verity` #333 (merged 2026-05-27T21:10Z). Adds `http://localhost:0/callback` to the `claude_desktop` row's `redirect_uris` allowlist; the Anthropic Claude Code MCP OAuth client uses `/callback` (no `/oauth/` prefix) which the strict-match validator rejected before this row.
 - Phase 1 Worker: `cchurctrip/verity-mcp` #17 (merged 2026-05-25T14:55Z)
 - Phase 2 consent UI: `cchurctrip/verity` #309 (merged 2026-05-24T19:37Z)
 
@@ -124,6 +125,24 @@ For each of the four target clients, run the install per the corresponding `docs
 - **Evidence**: Verified live 2026-05-27T16:43Z against Worker version `2a3e962c-84ec-426e-afaf-f93aeb6470d4` (the [#36](https://github.com/cchurctrip/verity-mcp/pull/36) `structuredContent` deploy). All six tools returned with `result.structuredContent` populated; the three tools that declare `outputSchema` (verity-score, verity-scan, morning-brief per VRT-160) no longer hit the strict-validation `-32600` rejection that was live at 2026-05-27T16:00Z pre-[#36](https://github.com/cchurctrip/verity-mcp/pull/36). End-to-end stack: `[verity#316](https://github.com/cchurctrip/verity/pull/316)` (upstream dual-path caller auth) → [#35](https://github.com/cchurctrip/verity-mcp/pull/35) (Worker forwards `x-worker-shared-secret`) → `verity#329` (`WORKER_SHARED_SECRET` set on Vercel + redeploy) → [#36](https://github.com/cchurctrip/verity-mcp/pull/36) (`structuredContent` on 2xx forwards).
 - **Status**: PASS
 
+### Claude Code (CLI, distinct from the Claude Desktop app)
+
+The Anthropic Claude Code CLI registers MCP servers via `~/.claude.json` (or via `claude mcp add`) and uses Claude Code's native `/mcp` slash command for the OAuth lifecycle. Claude Code reuses the `claude_desktop` allowlist row in v1 (no separate `claude_code` `client_id` row; see VRT-166-followup below).
+
+- **Install path tried**: Claude Code native MCP server registration with OAuth flow driven by the `/mcp` slash command (the Claude Code runtime holds its own loopback listener and manages the PKCE + token exchange internally; the in-tool `mcp__verity__authenticate` + `mcp__verity__complete_authentication` tool pair clears state across tool-call turns and is not the supported end-user path for Claude Code).
+- **client_id used**: `claude_desktop` (shared row from migration 046; the Claude Code MCP OAuth runtime defaults to this string).
+- **Consent screen rendered correctly?** yes (`https://verityskills.com/oauth/mcp/authorize`, scope `mcp:invoke`). Pre-#333 the consent UI returned "Connection blocked. The redirect address sent by the application is not on the allowlist for this client" because the `claude_desktop` row's `redirect_uris` did not yet permit `http://localhost:0/callback`. Post-#333 the consent UI accepted the request, redirected to `localhost:49866/callback?code=...&state=...`, Claude Code's loopback listener caught the code, redeemed the token, and the six tools became invocable inside the same conversation.
+- **Tool list after Connect**: 6 tools (verity-score, verity-scan, morning-brief, coordination-heat, cross-check-alert, disinfo-alert) registered via `mcp__verity__*` ToolSearch-loadable handles.
+- **6 tools invoked successfully**:
+  - [x] verity-score on NVDA - `{status:"ok", ticker:"NVDA", score:0, breakdown:{topicMix:0,coordination:0,sentimentVol:0,predMarketDivergence:0}, explanation:"Verity Score within normal range.", asof:"2026-05-27T08:05:45.817Z"}`
+  - [x] morning-brief on [NVDA, GME, TSLA] - `{status:"ok", variant:"clean", subject:"Verity morning brief: clean read", tickers:[3 entries], asof:"2026-05-27T22:13:29.864Z"}`
+  - [x] coordination-heat on GME - `{subject:"GME", status:"insufficient_data", signals_found:0, sources_checked:0, window_hours:2}`
+  - [x] verity-scan on AAPL - `{status:"ok", tickers_checked:["AAPL"], scan_window_hours:4, anomalies:[], clean:["AAPL"], anomaly_count:0, scanned_at:"2026-05-27T22:13:35.723Z"}`
+  - [x] cross-check-alert on "BlackRock filed for a spot Solana ETF on 2026-03-12" - `{verdict:"NO_SIGNAL", confidence:0, sources_checked:0, signals_matched:0, citations:[], source_conflicts:[]}`
+  - [x] disinfo-alert on TSLA / severity_threshold=medium - `{subject:"TSLA", severity_threshold:"medium", detected:false, status:"insufficient_data", patterns:[], signals_found:0, sources_checked:0, analyzed_at:"2026-05-27T22:13:40.805Z"}`
+- **Evidence**: Verified live 2026-05-27T22:13Z against Worker version `2a3e962c-84ec-426e-afaf-f93aeb6470d4`. End-to-end stack matches Cursor (above) with one delta: Phase 0 follow-up `cchurctrip/verity` #333 (merged 21:10Z) added `http://localhost:0/callback` to the `claude_desktop` row's `redirect_uris` allowlist before the Claude Code OAuth flow could pass the consent UI's strict-match check. The same data-quality observations from the Cursor smoke (`signals_found:0`, `sources_checked:0`, scores at 0) appear here for the same reason (downstream buildouts in progress; not an auth-pipe issue).
+- **Status**: PASS
+
 ### Gemini CLI
 
 - **Install path tried**: (OAuth via `gemini mcp add --oauth` / vtk_ direct bearer / both)
@@ -156,6 +175,9 @@ Token-passthrough ban (parent spec line 387) is verified structurally in `tests/
 
 ## Follow-up items (filed if needed)
 
-- Wire `COMMIT_SHA` injection into the deploy script (`--var COMMIT_SHA:$(git rev-parse HEAD)` on `wrangler deploy`).
+- Wire `COMMIT_SHA` injection into the deploy script (`--var COMMIT_SHA:$(git rev-parse HEAD)` on `wrangler deploy`). Also wire a `/health.commit` route that returns the same SHA (currently 404). Both are blocking the matrix's "Worker commit" field from being authoritative; falls back to the Wrangler version ID.
+- `VRT-166-followup-claude-code-client-id-row`: split `claude_code` out of the shared `claude_desktop` allowlist row into its own `mcp_oauth_clients` row with display name "Claude Code". Cosmetic; the consent screen currently reads "Claude Desktop wants to connect" when the user is in Claude Code. Splitting requires no client-side change (Claude Code's MCP OAuth runtime defaults to `claude_desktop` as the client_id, and overriding it requires a Claude Code config change we do not control end-to-end); blocks only on cleaner audit-log readability, not on functionality.
+- `VRT-166-followup-other-clients-callback-path-audit`: confirm the actual loopback paths used by ChatGPT Desktop (no loopback at all per `docs/CHATGPT_DESKTOP.md`; uses `https://chatgpt.com/connector_platform_oauth_redirect`), Cursor (DCR-registered via `mcp-remote`), Gemini CLI (`http://localhost:<port>/oauth/callback` per `docs/GEMINI_CLI.md`). If any client's actual loopback path differs from its allowlist row, the same one-row UPDATE pattern applies. Do not pre-emptively widen the allowlists; verify against the actual client first.
+- `VRT-166-followup-schema-migrations-backfill`: parent repo's `supabase_migrations.schema_migrations` table is stale as of 2026-05-14 (top entry `042_persona_inbox_marcus`). Migrations 043 through 050 were applied to prod (verified by reading `mcp_oauth_clients`, `mcp_oauth_codes`, `mcp_oauth_tokens` table state) without being recorded in `schema_migrations`. The Management API curl path used for migration 050 matches the existing pattern; backfill the registration rows so future replay tooling knows what is applied.
 - Cleanup cron for long-revoked refresh-token rows (iter-5 of PR #17 switched rotation from hard-delete to soft-revoke; rows accumulate without bound until a cleanup cron lands).
 - Lower-priority parent-review-batch findings deferred (see PR #17 iter-5 comment).
