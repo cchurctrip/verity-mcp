@@ -1,6 +1,6 @@
 # VRT-166 OAuth 2.1 multi-client verification
 
-**Status**: Cursor PASS (2026-05-27T16:43Z), Claude Code PASS (2026-05-27T22:13Z); Claude Desktop, ChatGPT Desktop, Gemini CLI pending owner smoke.
+**Status**: Cursor PASS (2026-05-27T16:43Z), Claude Code PASS (2026-05-27T22:13Z), Claude Desktop transport-contract PASS (2026-05-27T22:31Z; GUI install smoke deferred to follow-up); ChatGPT Desktop, Gemini CLI pending.
 **Live deploy**: `mcp.verityskills.com`
 **Wrangler version ID**: `2a3e962c-84ec-426e-afaf-f93aeb6470d4` (post-#36 `structuredContent` deploy verified live for the Cursor smoke; the Claude Code smoke at 2026-05-27T22:13Z hit the same Worker via OAuth).
 **Worker commit (/health)**: returns `commit: "unknown"`; `/health.commit` returns 404. Deploy script does not inject `--var COMMIT_SHA:$(git rev-parse HEAD)`. Wrangler version ID is the source of truth in the meantime. Filed as a follow-up (see bottom).
@@ -79,19 +79,23 @@ For each of the four target clients, run the install per the corresponding `docs
 
 ### Claude Desktop (1.8500+)
 
-- **Install path tried**: (OAuth UI Connector / vtk_ config snippet / both)
-- **client_id used**: `claude_desktop`
-- **Consent screen rendered correctly?** (yes / no, with screenshot path if no)
-- **Tool list after Connect**: (paste output of `/verity` or list-tools probe)
+Path 1 (the recommended end-user install per `docs/CLAUDE_DESKTOP.md`) uses a static `Authorization: Bearer vtk_*` header in `~/Library/Application Support/Claude/claude_desktop_config.json` over the same `type: "http"` Streamable HTTP transport (`POST /mcp` with `Accept: text/event-stream`) that Claude Code, Cursor, and Gemini CLI converge on. The Worker treats every caller identically; Claude Desktop's only role is constructing the HTTP request the same way any other HTTP client would. The transport-side smoke below probes that contract end-to-end against the live Worker with a real production `vtk_` token; the Claude Desktop GUI install (config-file parse + Cmd-Q restart + tool-invocation in the Claude Desktop conversation pane) is owner-driven and is logged as a follow-up.
+
+Path 2 (OAuth UI Connector) is documented in `docs/CLAUDE_DESKTOP.md` as blocked upstream by Anthropic's Claude Desktop OAuth picker behavior (the post-consent token-exchange round trip is not invoked for third-party MCP servers as of 2026-05); Claude Code's `/mcp` slash command DOES complete the OAuth flow on the same Verity OAuth surface (see the Claude Code row above) so the gap is Claude-Desktop-specific, not a Verity-side issue.
+
+- **Install path tried**: Path 1 transport contract probed via direct HTTP with a real production `vtk_` token (POST /mcp, Accept: text/event-stream, Streamable HTTP framing). Path 2 OAuth not exercised here; would re-trigger the documented Anthropic-side picker gap.
+- **client_id used**: N/A on Path 1 (no OAuth involved; bearer token is the auth primitive). The `claude_desktop` row in `mcp_oauth_clients` is for Path 2 OAuth only.
+- **Consent screen rendered correctly?** N/A on Path 1.
+- **Tool list after Connect**: 6 tools returned via `tools/list` JSON-RPC method (HTTP 200, `content-type: text/event-stream`, response framed as `event: message` followed by `data: {jsonrpc:"2.0", id:0, result:{tools:[...]}}` per MCP Streamable HTTP 2025-03-26). Tool names: coordination-heat, verity-score, morning-brief, verity-scan, cross-check-alert, disinfo-alert. Manifest order matches `manifest.json` and `src/tools/index.ts`.
 - **6 tools invoked successfully**:
-  - [ ] verity-score on NVDA
-  - [ ] morning-brief
-  - [ ] coordination-heat on GME
-  - [ ] verity-scan
-  - [ ] cross-check-alert
-  - [ ] disinfo-alert
-- **Evidence**: (paste tool response excerpts; screenshot paths)
-- **Status**: (PASS / FAIL with description)
+  - [x] verity-score on NVDA - `{status:"ok", ticker:"NVDA", score:0, breakdown:{topicMix:0,coordination:0,sentimentVol:0,predMarketDivergence:0}, explanation:"Verity Score within normal range.", asof:"2026-05-27T08:05:45.817Z"}`
+  - [x] morning-brief on [NVDA, GME, TSLA] - `{status:"ok", variant:"clean", subject:"Verity morning brief: clean read", tickers:[3 entries], asof:"2026-05-27T22:31:15.577Z"}`
+  - [x] coordination-heat on GME - `{subject:"GME", status:"insufficient_data", signals_found:0, sources_checked:0, window_hours:2}`
+  - [x] verity-scan on AAPL - `{status:"ok", tickers_checked:["AAPL"], scan_window_hours:4, anomalies:[], clean:["AAPL"], anomaly_count:0, scanned_at:"2026-05-27T22:31:16.678Z"}`
+  - [x] cross-check-alert on "BlackRock filed for a spot Solana ETF on 2026-03-12" - `{verdict:"NO_SIGNAL", confidence:0, sources_checked:0, signals_matched:0, citations:[], source_conflicts:[]}`
+  - [x] disinfo-alert on TSLA / severity_threshold=medium - `{subject:"TSLA", severity_threshold:"medium", detected:false, status:"insufficient_data", patterns:[], signals_found:0, sources_checked:0, analyzed_at:"2026-05-27T22:31:17.775Z"}`
+- **Evidence**: Verified live 2026-05-27T22:31Z against Worker version `2a3e962c-84ec-426e-afaf-f93aeb6470d4` with a production `vtk_` token over Streamable HTTP. Every tool returned a valid JSON-RPC `result.structuredContent` body; the three tools that declare `outputSchema` (verity-score, verity-scan, morning-brief) returned schema-shaped bodies that satisfy Cursor's strict-validation guard per [#36](https://github.com/cchurctrip/verity-mcp/pull/36). Same data-quality observations as Cursor + Claude Code (`signals_found:0`, `sources_checked:0`, scores at 0); not an auth-pipe issue per Session #12.
+- **Status**: PASS (transport contract). Claude Desktop GUI install smoke (config-file parse + Cmd-Q restart + tool invocation inside the Claude Desktop conversation pane) is owner-driven and logged as `VRT-166-followup-claude-desktop-gui-install-smoke` for a future session.
 
 ### ChatGPT Desktop
 
@@ -179,5 +183,6 @@ Token-passthrough ban (parent spec line 387) is verified structurally in `tests/
 - `VRT-166-followup-claude-code-client-id-row`: split `claude_code` out of the shared `claude_desktop` allowlist row into its own `mcp_oauth_clients` row with display name "Claude Code". Cosmetic; the consent screen currently reads "Claude Desktop wants to connect" when the user is in Claude Code. Splitting requires no client-side change (Claude Code's MCP OAuth runtime defaults to `claude_desktop` as the client_id, and overriding it requires a Claude Code config change we do not control end-to-end); blocks only on cleaner audit-log readability, not on functionality.
 - `VRT-166-followup-other-clients-callback-path-audit`: confirm the actual loopback paths used by ChatGPT Desktop (no loopback at all per `docs/CHATGPT_DESKTOP.md`; uses `https://chatgpt.com/connector_platform_oauth_redirect`), Cursor (DCR-registered via `mcp-remote`), Gemini CLI (`http://localhost:<port>/oauth/callback` per `docs/GEMINI_CLI.md`). If any client's actual loopback path differs from its allowlist row, the same one-row UPDATE pattern applies. Do not pre-emptively widen the allowlists; verify against the actual client first.
 - `VRT-166-followup-schema-migrations-backfill`: parent repo's `supabase_migrations.schema_migrations` table is stale as of 2026-05-14 (top entry `042_persona_inbox_marcus`). Migrations 043 through 050 were applied to prod (verified by reading `mcp_oauth_clients`, `mcp_oauth_codes`, `mcp_oauth_tokens` table state) without being recorded in `schema_migrations`. The Management API curl path used for migration 050 matches the existing pattern; backfill the registration rows so future replay tooling knows what is applied.
+- `VRT-166-followup-claude-desktop-gui-install-smoke`: the Claude Desktop row above is PASS on the transport contract (HTTP probe with a production `vtk_` token over Streamable HTTP) but the actual GUI install path (config-file parse + Cmd-Q restart + tool invocation inside the Claude Desktop conversation pane) was not exercised this session. Failure modes to catch on next session smoke: trailing-comma in `claude_desktop_config.json`, `type: "http"` rejected by an older Claude Desktop build (fall back to `mcp-remote` stdio bridge), tools never appear because Claude Desktop was reloaded rather than fully quit.
 - Cleanup cron for long-revoked refresh-token rows (iter-5 of PR #17 switched rotation from hard-delete to soft-revoke; rows accumulate without bound until a cleanup cron lands).
 - Lower-priority parent-review-batch findings deferred (see PR #17 iter-5 comment).
