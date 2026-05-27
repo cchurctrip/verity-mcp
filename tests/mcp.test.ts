@@ -235,7 +235,7 @@ describe('buildToolsListResult', () => {
 describe('outcomeToResponse', () => {
   const id = 7;
 
-  it('forward wraps upstream 2xx body in MCP content envelope, no isError', () => {
+  it('forward wraps upstream 2xx body in MCP content envelope, no isError, sets structuredContent (MCP 2025-06-18 outputSchema contract)', () => {
     const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: { ok: true }, upstreamStatus: 200, authPath: 'vtk' };
     expect(outcomeToResponse(outcome, id)).toEqual({
       body: {
@@ -243,6 +243,7 @@ describe('outcomeToResponse', () => {
         id,
         result: {
           content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+          structuredContent: { ok: true },
         },
       },
       status: 200,
@@ -345,6 +346,60 @@ describe('outcomeToResponse', () => {
     expect(env.result.content[0]!.type).toBe('text');
     expect(JSON.parse(env.result.content[0]!.text)).toEqual(upstream);
     expect(env.result.isError).toBeUndefined();
+  });
+
+  // MCP 2025-06-18 outputSchema contract pin (regression guard for the Cursor
+  // "Tool verity-score has an output schema but did not return structured
+  // content" failure 2026-05-27). Three tools currently declare outputSchema
+  // (verity-score, verity-scan, morning-brief per VRT-160) and strict
+  // clients (mcp-remote 0.1.37, Cursor 1.x) reject the entire response with
+  // JSON-RPC -32600 if result.structuredContent is missing. Setting it on
+  // every 2xx forward whose body is a non-null object is the cheapest correct
+  // fix: spec permits structuredContent on tools without outputSchema, so
+  // tools that don't declare one (coordination-heat, cross-check-alert,
+  // disinfo-alert) get it for free and clients that don't validate ignore it.
+  it('forward sets structuredContent: <body> on 2xx with object body (mcp-remote / Cursor outputSchema strict-validation guard)', () => {
+    const upstream = { status: 'ok', ticker: 'NVDA', score: 75, breakdown: { coordination: 0.4 }, explanation: 'x', asof: '2026-05-27' };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: upstream, upstreamStatus: 200, authPath: 'vtk' };
+    const r = outcomeToResponse(outcome, id);
+    const env = r.body as { result: { structuredContent?: unknown } };
+    expect(env.result.structuredContent).toEqual(upstream);
+  });
+
+  it('forward also sets structuredContent on the insufficient_data discriminated-union variant (verity-score / coordination-score success shapes)', () => {
+    // The status='insufficient_data' branch is a legitimate 2xx success that
+    // matches the outputSchema oneOf; structuredContent must be populated so
+    // strict-validating clients accept the response.
+    const upstream = { subject: 'GME', status: 'insufficient_data', summary: '...', signals_found: 0, sources_checked: 0, window_hours: 2 };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: upstream, upstreamStatus: 200, authPath: 'oauth' };
+    const r = outcomeToResponse(outcome, id);
+    const env = r.body as { result: { structuredContent?: unknown; isError?: boolean } };
+    expect(env.result.structuredContent).toEqual(upstream);
+    expect(env.result.isError).toBeUndefined();
+  });
+
+  it('forward does NOT set structuredContent on non-2xx (error envelope would fail outputSchema validation a second time)', () => {
+    // 402 trial cap, 401, 403, etc. The error body shape does not match the
+    // success outputSchema, so propagating it as structuredContent would
+    // trigger the same strict-validation rejection on the client. content[]
+    // carries the error payload as text exactly as before.
+    const errBody = { code: 'TRIAL_CAP_REACHED', upgrade_url: 'https://verityskills.com/upgrade' };
+    const outcome: ProxyOutcome = { kind: 'forward', status: 402, body: errBody, upstreamStatus: 402, authPath: 'vtk' };
+    const r = outcomeToResponse(outcome, id);
+    const env = r.body as { result: { structuredContent?: unknown; isError?: boolean } };
+    expect(env.result.structuredContent).toBeUndefined();
+    expect(env.result.isError).toBe(true);
+  });
+
+  it('forward does NOT set structuredContent on 2xx with non-object body (null, string, number, array — outputSchema requires object)', () => {
+    // Defensive guard: tools declaring outputSchema all use `type: object`
+    // at the root (VRT-160 pin). A non-object 2xx body cannot satisfy that
+    // and would trigger client rejection; skip structuredContent and let
+    // the text content path carry the value.
+    const outcome: ProxyOutcome = { kind: 'forward', status: 200, body: null, upstreamStatus: 200, authPath: 'vtk' };
+    const r = outcomeToResponse(outcome, id);
+    const env = r.body as { result: { structuredContent?: unknown } };
+    expect(env.result.structuredContent).toBeUndefined();
   });
 
   it('bearer_invalid returns HTTP 401 with INVALID_BEARER_FORMAT body (non JSON-RPC envelope)', () => {
@@ -526,6 +581,10 @@ describe('handleMcpRequest', () => {
       id: 9,
       result: {
         content: [{ type: 'text', text: JSON.stringify({ score: 87 }) }],
+        // VRT-166 follow-up: structuredContent is populated on every 2xx
+        // forward whose body is a non-null object so strict MCP clients
+        // (Cursor, mcp-remote) can validate against outputSchema.
+        structuredContent: { score: 87 },
       },
     });
 

@@ -256,14 +256,41 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
         outcome.status === 401
           ? { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE }
           : undefined;
+      // MCP 2025-06-18: when a tool advertises an outputSchema in tools/list,
+      // strict clients (mcp-remote 0.1.37, Cursor 1.x, Claude Desktop SDK)
+      // reject the entire response with JSON-RPC -32600 if the result lacks
+      // structuredContent. Symptom we hit 2026-05-27 on verity-score:
+      //   "Tool verity-score has an output schema but did not return
+      //    structured content"
+      // Three of six tools currently declare outputSchema (verity-score,
+      // verity-scan, morning-brief per VRT-160), and others may add it
+      // later, so the cheapest correct fix is to ALWAYS populate
+      // structuredContent on 2xx forwards when the body is a non-null
+      // object. The spec permits structuredContent on tools without an
+      // outputSchema; clients that don't validate just ignore it.
+      // Error responses (status >= 300, isError: true) intentionally
+      // omit structuredContent: the error envelope shape doesn't match
+      // the success outputSchema and would fail client-side validation
+      // a second time. content[] carries the error payload as text
+      // exactly as before.
+      const result: {
+        content: Array<{ type: 'text'; text: string }>;
+        structuredContent?: object;
+        isError?: true;
+      } = {
+        content: [{ type: 'text', text: JSON.stringify(outcome.body) }],
+      };
+      if (!isError && typeof outcome.body === 'object' && outcome.body !== null) {
+        result.structuredContent = outcome.body as object;
+      }
+      if (isError) {
+        result.isError = true;
+      }
       return {
         body: {
           jsonrpc: '2.0',
           id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(outcome.body) }],
-            ...(isError ? { isError: true } : {}),
-          },
+          result,
         },
         status: outcome.status,
         ...(headers !== undefined ? { headers } : {}),
