@@ -110,19 +110,19 @@ For each of the four target clients, run the install per the corresponding `docs
 
 ### Cursor
 
-- **Install path tried**: (OAuth via Cursor Settings MCP / vtk_ config snippet / both)
-- **client_id used**: `cursor`
-- **Consent screen rendered correctly?** (yes / no)
-- **Tool list after Connect**: (paste output of `cursor mcp list verity` or equivalent)
+- **Install path tried**: OAuth via `mcp-remote` stdio bridge (`command: npx -y mcp-remote https://mcp.verityskills.com/mcp`). Direct-HTTP mcp.json path remains blocked on the Cursor 1.x V2 FSM URL-normalization + DCR-replay bugs (issue #25 parts 1-7); mcp-remote is the supported install path for Cursor end-users until those FSM bugs ship-fix upstream.
+- **client_id used**: `cursor` (dynamically registered via `mcp-remote`)
+- **Consent screen rendered correctly?** yes (`https://verityskills.com/oauth/consent`, scope `mcp:invoke`)
+- **Tool list after Connect**: 6 tools (coordination-heat, verity-score, morning-brief, verity-scan, cross-check-alert, disinfo-alert) — manifest order matches `manifest.json` and `src/tools/index.ts`.
 - **6 tools invoked successfully**:
-  - [ ] verity-score on NVDA
-  - [ ] morning-brief
-  - [ ] coordination-heat on GME
-  - [ ] verity-scan
-  - [ ] cross-check-alert
-  - [ ] disinfo-alert
-- **Evidence**: (paste)
-- **Status**: (PASS / FAIL)
+  - [x] verity-score on NVDA — `{status:"ok", ticker:"NVDA", score:0, breakdown:{...}, asof:"2026-05-27T08:05:45.817Z"}`
+  - [x] morning-brief on [NVDA, GME, TSLA] — `{status:"ok", variant:"clean", subject:"Verity morning brief: clean read", tickers:[3 entries], asof:"2026-05-27T16:43:43Z"}`
+  - [x] coordination-heat on GME — `{subject:"GME", status:"insufficient_data", signals_found:0, sources_checked:0, window_hours:2}`
+  - [x] verity-scan on AAPL — `{status:"ok", tickers_checked:["AAPL"], anomalies:[], clean:["AAPL"], anomaly_count:0, scanned_at:"2026-05-27T16:43:51Z"}`
+  - [x] cross-check-alert on "BlackRock filed for a spot Solana ETF on 2026-03-12" — `{verdict:"NO_SIGNAL", confidence:0, sources_checked:0, signals_matched:0}`
+  - [x] disinfo-alert on TSLA / severity_threshold=medium — `{subject:"TSLA", severity_threshold:"medium", detected:false, status:"insufficient_data", patterns:[]}`
+- **Evidence**: Verified live 2026-05-27T16:43Z against Worker version `2a3e962c-84ec-426e-afaf-f93aeb6470d4` (the [#36](https://github.com/cchurctrip/verity-mcp/pull/36) `structuredContent` deploy). All six tools returned with `result.structuredContent` populated; the three tools that declare `outputSchema` (verity-score, verity-scan, morning-brief per VRT-160) no longer hit the strict-validation `-32600` rejection that was live at 2026-05-27T16:00Z pre-[#36](https://github.com/cchurctrip/verity-mcp/pull/36). End-to-end stack: `[verity#316](https://github.com/cchurctrip/verity/pull/316)` (upstream dual-path caller auth) → [#35](https://github.com/cchurctrip/verity-mcp/pull/35) (Worker forwards `x-worker-shared-secret`) → `verity#329` (`WORKER_SHARED_SECRET` set on Vercel + redeploy) → [#36](https://github.com/cchurctrip/verity-mcp/pull/36) (`structuredContent` on 2xx forwards).
+- **Status**: PASS
 
 ### Gemini CLI
 
