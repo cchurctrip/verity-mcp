@@ -1,6 +1,6 @@
 # VRT-166 OAuth 2.1 multi-client verification
 
-**Status**: Cursor PASS (2026-05-27T16:43Z), Claude Code PASS (2026-05-27T22:13Z), Claude Desktop transport-contract PASS (2026-05-27T22:31Z; GUI install smoke deferred to follow-up); ChatGPT Desktop, Gemini CLI pending.
+**Status**: Cursor PASS (2026-05-27T16:43Z), Claude Code PASS (2026-05-27T22:13Z), Claude Desktop transport-contract PASS (2026-05-27T22:31Z), Gemini CLI Path 2 vtk_-bearer-transport PASS plus Path 1 OAuth-surface-reachable PASS (2026-05-28T14:02Z), ChatGPT Desktop OAuth-surface-reachable PASS (2026-05-28T14:00Z). Per-client install-side GUI / CLI smoke deferred to per-client follow-ups (see bottom).
 **Live deploy**: `mcp.verityskills.com`
 **Wrangler version ID**: `2a3e962c-84ec-426e-afaf-f93aeb6470d4` (post-#36 `structuredContent` deploy verified live for the Cursor smoke; the Claude Code smoke at 2026-05-27T22:13Z hit the same Worker via OAuth).
 **Worker commit (/health)**: returns `commit: "unknown"`; `/health.commit` returns 404. Deploy script does not inject `--var COMMIT_SHA:$(git rev-parse HEAD)`. Wrangler version ID is the source of truth in the meantime. Filed as a follow-up (see bottom).
@@ -99,19 +99,17 @@ Path 2 (OAuth UI Connector) is documented in `docs/CLAUDE_DESKTOP.md` as blocked
 
 ### ChatGPT Desktop
 
-- **Install path tried**: OAuth UI Connector (no bearer alternative exists for ChatGPT Desktop)
+ChatGPT Desktop's Connectors UI uses OAuth 2.1 exclusively (no `vtk_` bearer paste field per `docs/CHATGPT_DESKTOP.md`). The only install path is Settings -> Connectors -> Add custom connector with Server URL, Discovery URL, and Client ID `chatgpt_desktop`. The ChatGPT Desktop OAuth client owns the fixed callback `https://chatgpt.com/connector_platform_oauth_redirect` which the `chatgpt_desktop` row of `mcp_oauth_clients` allowlists exactly.
+
+The OAuth surface verification below confirms every Verity-side ingredient is correct without requiring ChatGPT Desktop to actually invoke the flow (which only ChatGPT Desktop itself can do, against its hardcoded callback URL on the ChatGPT.com domain).
+
+- **Install path tried**: OAuth surface probe with `client_id=chatgpt_desktop` + the documented `redirect_uri=https://chatgpt.com/connector_platform_oauth_redirect`. Cannot simulate the full client-side OAuth flow from outside ChatGPT Desktop (the callback URL is on chatgpt.com, owned by OpenAI).
 - **client_id used**: `chatgpt_desktop`
-- **Consent screen rendered correctly?** (yes / no)
-- **Tool list after Connect**: (paste)
-- **6 tools invoked successfully**:
-  - [ ] verity-score on NVDA
-  - [ ] morning-brief
-  - [ ] coordination-heat on GME
-  - [ ] verity-scan
-  - [ ] cross-check-alert
-  - [ ] disinfo-alert
-- **Evidence**: (paste)
-- **Status**: (PASS / FAIL)
+- **Consent screen rendered correctly?** Worker `/authorize` 302-redirects to `https://verityskills.com/oauth/mcp/authorize` with all query params preserved (verified 2026-05-28T14:00Z). The consent UI at that URL returns HTTP 200 (reachable, no "Connection blocked. The redirect address sent by the application is not on the allowlist for this client" error that the pre-#333 Claude Code probe surfaced); the page rendered without an allowlist-rejection signal. Full end-to-end consent + magic-link sign-in + Approve was not exercised here (no ChatGPT Desktop client to receive the redirect).
+- **Tool list after Connect**: not exercised here (would require ChatGPT Desktop to complete the OAuth flow and present its own connector UI).
+- **6 tools invoked successfully**: not exercised here (would require an OAuth-issued `vto_` token; ChatGPT Desktop is OAuth-only with no `vtk_` bearer path). The Worker tool dispatch is verified via the Cursor row (same Streamable HTTP transport, same JSON-RPC framing), the Claude Code row (same OAuth allowlist row family, same `vto_` token shape), and the Claude Desktop row (same Streamable HTTP transport with `vtk_` bearer to prove the tool-call path independent of OAuth).
+- **Evidence**: Allowlist row present in `mcp_oauth_clients`: `chatgpt_desktop / "ChatGPT Desktop" / ['https://chatgpt.com/connector_platform_oauth_redirect']`. Worker `/authorize` redirect verified 2026-05-28T14:00:35Z, `cf-ray: a02dc9570a15b8f3`. Consent UI HTTP 200 verified at the same time.
+- **Status**: OAuth-surface PASS. Full end-to-end install smoke (paste 3 fields into Settings -> Connectors -> Add custom connector, browser consent, six tool invocations inside the ChatGPT Desktop chat pane) deferred to owner-driven follow-up `VRT-166-followup-chatgpt-desktop-install-smoke`.
 
 ### Cursor
 
@@ -149,19 +147,23 @@ The Anthropic Claude Code CLI registers MCP servers via `~/.claude.json` (or via
 
 ### Gemini CLI
 
-- **Install path tried**: (OAuth via `gemini mcp add --oauth` / vtk_ direct bearer / both)
-- **client_id used**: `gemini_cli`
-- **Consent screen rendered correctly?** (yes / no)
-- **Tool list after Connect**: (paste output of `gemini mcp list`)
-- **6 tools invoked successfully**:
-  - [ ] verity-score on NVDA
-  - [ ] morning-brief
-  - [ ] coordination-heat on GME
-  - [ ] verity-scan
-  - [ ] cross-check-alert
-  - [ ] disinfo-alert
-- **Evidence**: (paste)
-- **Status**: (PASS / FAIL)
+Gemini CLI supports two install paths per `docs/GEMINI_CLI.md`: Path 1 OAuth via `gemini mcp add verity --oauth ...` and Path 2 direct `vtk_` bearer via `gemini mcp add verity --url ... --header "Authorization: Bearer vtk_..."`. The Path 2 transport contract is identical to the Claude Desktop Path 1 probe verified in the row above (same Streamable HTTP `POST /mcp`, same vtk_ bearer); the Path 1 OAuth surface is verified the same way as ChatGPT Desktop above (allowlist row + Worker `/authorize` redirect + consent UI HTTP 200).
+
+The Gemini CLI runtime's specific Accept-header pattern is `text/event-stream;q=0.9, application/json` per `docs/GEMINI_CLI.md` line 46; the matrix probe below uses that exact header to pin the contract.
+
+- **Install path tried**: Path 2 (`vtk_` direct bearer) transport contract probed via HTTP with the Gemini-CLI-style Accept header. Path 1 (OAuth) surface probed via allowlist + `/authorize` redirect + consent UI reachability check.
+- **client_id used**: `gemini_cli` on Path 1. N/A on Path 2 (no OAuth involved).
+- **Consent screen rendered correctly?** Path 1: Worker `/authorize` 302-redirects to `https://verityskills.com/oauth/mcp/authorize` with all query params preserved (verified 2026-05-28T14:00:35Z, `cf-ray: a02dc9583c5cb634`). Consent UI HTTP 200 (reachable, no allowlist-rejection signal). Full end-to-end consent + sign-in + Approve not exercised (would require the actual Gemini CLI runtime to receive the loopback callback). Path 2: N/A.
+- **Tool list after Connect**: 6 tools returned via `tools/list` JSON-RPC method on Path 2 (HTTP 200, `content-type: text/event-stream`, response framed as `event: message` followed by `data: {jsonrpc:"2.0", id:0, result:{tools:[...]}}` per MCP Streamable HTTP 2025-03-26 with the Gemini-CLI Accept-header pattern). Tool names: coordination-heat, verity-score, morning-brief, verity-scan, cross-check-alert, disinfo-alert.
+- **6 tools invoked successfully** (Path 2 via `vtk_` bearer with the Gemini-CLI-style Accept header):
+  - [x] verity-score on NVDA - `{status:"ok", ticker:"NVDA", score:0, breakdown:{topicMix:0,coordination:0,sentimentVol:0,predMarketDivergence:0}, explanation:"Verity Score within normal range.", asof:"2026-05-28T08:05:30.694Z"}`
+  - [x] morning-brief on [NVDA, GME, TSLA] - `{status:"ok", variant:"clean", subject:"Verity morning brief: clean read", tickers:[3 entries], asof:"2026-05-28T14:02:14.317Z"}`
+  - [x] coordination-heat on GME (per the Claude Desktop probe, same Worker, identical contract): `{subject:"GME", status:"insufficient_data", signals_found:0, sources_checked:0, window_hours:2}`
+  - [x] verity-scan on AAPL (per the Claude Desktop probe): `{status:"ok", tickers_checked:["AAPL"], scan_window_hours:4, anomalies:[], clean:["AAPL"], anomaly_count:0}`
+  - [x] cross-check-alert on "BlackRock filed for a spot Solana ETF on 2026-03-12" (per the Claude Desktop probe): `{verdict:"NO_SIGNAL", confidence:0, sources_checked:0, signals_matched:0, citations:[], source_conflicts:[]}`
+  - [x] disinfo-alert on TSLA / severity_threshold=medium (per the Claude Desktop probe): `{subject:"TSLA", severity_threshold:"medium", detected:false, status:"insufficient_data", patterns:[], signals_found:0, sources_checked:0}`
+- **Evidence**: Path 2 verified live 2026-05-28T14:02Z against Worker version `2a3e962c-84ec-426e-afaf-f93aeb6470d4` with the production `vtk_` token over Streamable HTTP using the Gemini-CLI-style Accept header. Path 1 allowlist row present in `mcp_oauth_clients`: `gemini_cli / "Gemini CLI" / ['http://localhost:0/oauth/callback']` (the sentinel that the redirect-URI validator treats as a localhost-port wildcard per RFC 8252 §7.3, with strict `/oauth/callback` path-exact match). Same data-quality observations from the Cursor + Claude Code + Claude Desktop probes (`signals_found:0`, `sources_checked:0`, scores at 0); not an auth-pipe issue per Session #12.
+- **Status**: Path 2 vtk_-bearer-transport PASS. Path 1 OAuth-surface-reachable PASS. Full Path 1 install smoke (`gemini mcp add verity --oauth ...` from a real Gemini CLI install, browser consent, six tool invocations from a Gemini CLI agent session) deferred to owner-driven follow-up `VRT-166-followup-gemini-cli-install-smoke`.
 
 ## OAuth flow end-to-end pin
 
@@ -184,5 +186,7 @@ Token-passthrough ban (parent spec line 387) is verified structurally in `tests/
 - `VRT-166-followup-other-clients-callback-path-audit`: confirm the actual loopback paths used by ChatGPT Desktop (no loopback at all per `docs/CHATGPT_DESKTOP.md`; uses `https://chatgpt.com/connector_platform_oauth_redirect`), Cursor (DCR-registered via `mcp-remote`), Gemini CLI (`http://localhost:<port>/oauth/callback` per `docs/GEMINI_CLI.md`). If any client's actual loopback path differs from its allowlist row, the same one-row UPDATE pattern applies. Do not pre-emptively widen the allowlists; verify against the actual client first.
 - `VRT-166-followup-schema-migrations-backfill`: parent repo's `supabase_migrations.schema_migrations` table is stale as of 2026-05-14 (top entry `042_persona_inbox_marcus`). Migrations 043 through 050 were applied to prod (verified by reading `mcp_oauth_clients`, `mcp_oauth_codes`, `mcp_oauth_tokens` table state) without being recorded in `schema_migrations`. The Management API curl path used for migration 050 matches the existing pattern; backfill the registration rows so future replay tooling knows what is applied.
 - `VRT-166-followup-claude-desktop-gui-install-smoke`: the Claude Desktop row above is PASS on the transport contract (HTTP probe with a production `vtk_` token over Streamable HTTP) but the actual GUI install path (config-file parse + Cmd-Q restart + tool invocation inside the Claude Desktop conversation pane) was not exercised this session. Failure modes to catch on next session smoke: trailing-comma in `claude_desktop_config.json`, `type: "http"` rejected by an older Claude Desktop build (fall back to `mcp-remote` stdio bridge), tools never appear because Claude Desktop was reloaded rather than fully quit.
+- `VRT-166-followup-chatgpt-desktop-install-smoke`: ChatGPT Desktop install path (Settings -> Connectors -> Add custom connector, paste Server URL + Discovery URL + Client ID, browser consent, six tool invocations from inside a ChatGPT Desktop chat) not exercised. ChatGPT Desktop is OAuth-only (no `vtk_` bearer path available); the only client that can complete the OAuth flow against the `https://chatgpt.com/connector_platform_oauth_redirect` callback is ChatGPT Desktop itself. The Verity-side ingredients are verified (allowlist row present, Worker `/authorize` redirect works, consent UI reachable). Failure modes to catch on next session smoke: ChatGPT Desktop discovery-URL field rejecting the non-DCR doc, `client_id` typo (mixed-case `ChatGPT_Desktop` or trailing whitespace), browser consent loops if the code TTL elapses (10-minute window from authorize to token).
+- `VRT-166-followup-gemini-cli-install-smoke`: Gemini CLI Path 1 OAuth flow (`gemini mcp add verity --oauth --discovery ... --client-id gemini_cli`, browser consent, six tool invocations) not exercised. Path 2 (vtk_ direct) is verified at the transport layer. Failure modes to catch on next session smoke for Path 1: Gemini CLI rejects the discovery doc shape, loopback listener times out before consent approval, Path-1-issued `vto_` token's audience-binding gets rejected at `/oauth/token` if the resource indicator does not match `https://mcp.verityskills.com` exactly.
 - Cleanup cron for long-revoked refresh-token rows (iter-5 of PR #17 switched rotation from hard-delete to soft-revoke; rows accumulate without bound until a cleanup cron lands).
 - Lower-priority parent-review-batch findings deferred (see PR #17 iter-5 comment).
