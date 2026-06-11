@@ -409,7 +409,12 @@ describe('outcomeToResponse', () => {
     expect(outcomeToResponse(outcome, id)).toEqual({
       body: {
         code: 'INVALID_BEARER_FORMAT',
-        error: "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'",
+        error:
+          "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'. " +
+          'No token yet? Start a free 7-day trial at https://verityskills.com/signup ' +
+          '(email only, no card) and copy your API key, or connect via OAuth from ' +
+          'Claude, ChatGPT, or Cursor.',
+        get_started: 'https://verityskills.com/signup',
       },
       status: 401,
       headers: {
@@ -640,7 +645,12 @@ describe('handleMcpRequest', () => {
     expect(r.status).toBe(401);
     expect(r.body).toEqual({
       code: 'INVALID_BEARER_FORMAT',
-      error: "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'",
+      error:
+        "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'. " +
+        'No token yet? Start a free 7-day trial at https://verityskills.com/signup ' +
+        '(email only, no card) and copy your API key, or connect via OAuth from ' +
+        'Claude, ChatGPT, or Cursor.',
+      get_started: 'https://verityskills.com/signup',
     });
   });
 

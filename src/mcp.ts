@@ -300,7 +300,15 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
       return {
         body: {
           code: 'INVALID_BEARER_FORMAT',
-          error: "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'",
+          error:
+            "Authorization header must be 'Bearer vtk_<token>' or 'Bearer vto_<token>'. " +
+            'No token yet? Start a free 7-day trial at https://verityskills.com/signup ' +
+            '(email only, no card) and copy your API key, or connect via OAuth from ' +
+            'Claude, ChatGPT, or Cursor.',
+          // First-contact discoverability: for agent-channel adopters this 401
+          // IS the landing page (owner decision 2026-06-11), so it must say
+          // where tokens come from, machine-readably too.
+          get_started: 'https://verityskills.com/signup',
         },
         status: 401,
         headers: { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE },
