@@ -320,7 +320,15 @@ const handler = {
         return jsonResponse(
           {
             code: 'INVALID_BEARER_FORMAT',
-            error: "Authorization header must be 'Bearer vtk_<token>'",
+            error:
+              "Authorization header must be 'Bearer vtk_<token>'. " +
+              'No token yet? Start a free 7-day trial at https://verityskills.com/signup ' +
+              '(email only, no card) and copy your API key, or connect via OAuth from ' +
+              'Claude, ChatGPT, or Cursor.',
+            // First-contact discoverability (PR #46 covered /mcp; this is the
+            // /sse twin): for agent-channel adopters this 401 IS the landing
+            // page, so it says where tokens come from, machine-readably too.
+            get_started: 'https://verityskills.com/signup',
           },
           401,
           { 'WWW-Authenticate': WWW_AUTHENTICATE_VALUE },
