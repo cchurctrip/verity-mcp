@@ -291,12 +291,16 @@ describe('GET /sse legacy bridge handshake (integration, VRT-165)', () => {
   // contract; the live probes verify the actual streaming behavior.
 });
 
-describe('POST /sse cross-isolate fallback (integration, MCP 2024-11-05 6.2.2)', () => {
-  it('valid bearer with no open GET /sse stream in this isolate: 200 + envelope inline (MCP 2024-11-05 6.2.2 fallback)', async () => {
-    // Pins the relay-not-found fallback: a valid bearer is present, the
-    // dispatch returns status 200, but no GET /sse for this bearer-hash
-    // exists in this isolate. relaySsePostToStream returns 'no_stream'
-    // and the caller falls back to inline JSON per the spec.
+describe('POST /sse always responds inline (integration, MCP 2024-11-05 6.2.2)', () => {
+  it('valid bearer: 200 + envelope inline (relay removed; no cross-request stream write)', async () => {
+    // Pins the post-2026-06-16 contract: POST /sse ALWAYS returns the
+    // JSON-RPC envelope inline. The prior same-isolate relay into the open
+    // GET /sse stream was removed because writing the POST response into the
+    // GET request's stream writer is cross-request I/O, which Cloudflare
+    // Workers forbid (Sentry 947521a7). There is no 202 path anymore; every
+    // POST /sse takes the MCP 2024-11-05 6.2.2 inline fallback. The proper
+    // server-to-stream relay returns under the Durable-Object follow-up
+    // (see docs/DEVLOG.md 2026-06-16).
     //
     // The bearer fixture is alphanumeric-only on purpose: the regex
     // `^Bearer (vtk_[A-Za-z0-9]+)` rejects underscores after the vtk_
