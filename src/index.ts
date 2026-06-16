@@ -50,7 +50,6 @@ import {
 import {
   acceptHeaderRequestsSse,
   openSseEndpointStream,
-  relaySsePostToStream,
   respondSseEnvelope,
   sha256HexBearer,
 } from './transport-sse';
@@ -356,31 +355,21 @@ const handler = {
         }),
       );
 
-      // Try to relay the response over the open GET /sse stream for this
-      // bearer when both sides landed on the same isolate. On success the
-      // client receives the envelope as an SSE `event: message` on the GET
-      // stream and the POST replies HTTP 202 with no body. Transport-level
-      // errors (status !== 200) and bearer-absent/invalid cases skip the
-      // relay and respond with the envelope inline so the client sees the
-      // right HTTP status on its retry layer.
-      //
-      // The relay returns a three-valued outcome so a "no open stream"
-      // (the documented cross-isolate fallback) is distinguishable in logs
-      // from a "stream open but write errored" (a real anomaly worth
-      // investigating). Both fall back to the inline-envelope response;
-      // only the log lines differ.
-      if (result.status === 200) {
-        const auth = readBearer(req);
-        if (auth.kind === 'valid') {
-          const bearerHash = await sha256HexBearer(auth.token);
-          const relayOutcome = await relaySsePostToStream(result.body, bearerHash);
-          if (relayOutcome === 'relayed') {
-            return new Response(null, { status: 202, headers: CORS_HEADERS });
-          }
-        }
-      }
-
-      // MCP 2024-11-05 section 6.2.2 fallback.
+      // Respond with the JSON-RPC envelope inline (MCP 2024-11-05 section
+      // 6.2.2 fallback). The prior same-isolate relay into the open GET /sse
+      // stream is removed: a Cloudflare Worker forbids one request handler
+      // from performing I/O on a stream created by a DIFFERENT request
+      // handler. The GET /sse writer belongs to the GET request; writing the
+      // POST response into it threw "Cannot perform I/O on behalf of a
+      // different request" (Sentry 947521a7, 2026-06-16). That guard fires on
+      // EVERY same-isolate relay (GET and POST are always different requests),
+      // not just the cross-isolate tail the original design assumed, and it
+      // escapes the call-site try/catch, so the relay can never succeed and
+      // could not be caught reliably. A correct server-to-GET-stream relay
+      // needs a Durable Object that owns the stream; tracked as the
+      // Durable-Object SSE relay follow-up (see docs/DEVLOG.md 2026-06-16).
+      // Until then every POST /sse returns the envelope inline, which strict
+      // and lenient clients both accept under the 6.2.2 fallback.
       return jsonResponse(result.body, result.status, result.headers);
     }
 

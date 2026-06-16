@@ -15,18 +15,20 @@
 //      whose `data:` payload is the absolute URL of the POST endpoint
 //      (per MCP 2024-11-05 "HTTP with SSE": the server MUST send an
 //      endpoint event containing a URI). POST /sse forwards the
-//      JSON-RPC envelope through handleMcpRequest, then relays the
-//      response over the open GET stream when both requests landed on
-//      the same Worker isolate. When the GET and POST landed on
-//      different isolates the POST handler falls back to HTTP 202 with
-//      the envelope in the response body (the MCP 2024-11-05 section
-//      6.2.2 fallback).
+//      JSON-RPC envelope through handleMcpRequest and returns the
+//      response inline (MCP 2024-11-05 section 6.2.2 fallback).
 //
-// Cloudflare Workers do not pin a client to an isolate. Observed
-// edge-routing locality keeps same-bearer same-isolate at well over 95
-// percent within a 30-second window from the same client IP and TLS
-// session, which covers the documented Comet connect-then-POST flow. The
-// 202 fallback covers the cross-isolate tail.
+// NOTE (2026-06-16): POST /sse no longer relays the response over the
+// open GET stream. Writing the POST response into the GET request's
+// stream writer is cross-request I/O, which Cloudflare Workers forbid
+// ("Cannot perform I/O on behalf of a different request"); GET and POST
+// are always different requests, so the relay threw on every same-isolate
+// attempt (Sentry 947521a7). The original 95-percent-same-isolate
+// assumption conflated same-isolate with same-request. Until the
+// Durable-Object SSE relay follow-up lands (see docs/DEVLOG.md
+// 2026-06-16), every POST /sse takes the inline 6.2.2 fallback and the
+// relaySsePostToStream + openStreams machinery below is retained but not
+// wired into the request path.
 //
 // Brand Rule 2: no vendor-internal product names (Workers, isolates,
 // TransformStream, KV, R2, Durable Objects, Supabase, Sentry) appear in
@@ -65,8 +67,10 @@ export const KEEP_ALIVE_BYTES: Uint8Array = TEXT_ENCODER.encode(':keep-alive\n\n
 export const KEEP_ALIVE_INTERVAL_MS = 15_000;
 
 // Module-scope map of open SSE GET streams keyed by sha256(bearer) hex.
-// Same isolate => populated; different isolate => empty (and the POST
-// /sse handler falls back to HTTP 202 with the envelope in the body).
+// RETAINED, NOT WIRED (2026-06-16): populated by GET /sse, read by nothing
+// in the request path. The POST /sse relay that consumed it was removed
+// (cross-request I/O is forbidden on Workers); POST /sse now always responds
+// inline. Kept so the Durable-Object SSE relay follow-up has the plumbing.
 //
 // Each entry carries an AbortController so the keep-alive loop can exit
 // promptly when:
@@ -146,9 +150,13 @@ export function respondSseEnvelope(envelope: unknown, status: number): Response 
 
 /**
  * Open an SSE response for GET /sse. Returns a Response whose body is a
- * ReadableStream; the WritableStream side is held by the in-isolate
- * keyed map so a follow-up POST /sse from the same bearer (and same
- * isolate) can relay the JSON-RPC response over the same stream.
+ * ReadableStream; the WritableStream side is held by the in-isolate keyed
+ * map. NOTE (2026-06-16): nothing currently reads that map. The POST /sse
+ * relay that would have written the JSON-RPC response onto this stream was
+ * removed (cross-request I/O is forbidden on Workers); POST /sse responds
+ * inline. The map write is retained for the Durable-Object follow-up. This
+ * GET stream still serves its other purpose: emitting the `event: endpoint`
+ * handshake frame and holding the EventSource channel open.
  *
  * Initial frame: `event: endpoint` with `data:` containing the absolute
  * URL of the POST endpoint, computed from the request URL's origin (per
@@ -251,11 +259,23 @@ export function openSseEndpointStream(
 }
 
 /**
+ * RETAINED, NOT WIRED (2026-06-16). The POST /sse handler no longer calls
+ * this: writing the POST response into the GET request's stream writer is a
+ * cross-request I/O operation, which Cloudflare Workers forbid ("Cannot
+ * perform I/O on behalf of a different request", Sentry 947521a7). The guard
+ * fires on every same-isolate relay (GET and POST are always different
+ * requests), so the relay can never succeed and POST /sse now always responds
+ * inline (MCP 2024-11-05 section 6.2.2). A correct server-to-GET-stream relay
+ * needs a Durable Object that owns the stream so both requests address the
+ * same I/O context; that is the Durable-Object SSE relay follow-up (see
+ * docs/DEVLOG.md 2026-06-16). This function and the openStreams map are kept
+ * so the DO rework has the framing + bearer-hash plumbing in place; until it
+ * lands the map is populated by GET /sse but read by nothing.
+ *
  * Relay a JSON-RPC envelope to the open SSE stream identified by
- * bearerHash. Returns true if the relay succeeded; false if no open
- * stream exists for this bearer in this isolate (caller falls back to
- * HTTP 202 with the envelope in the response body, per the MCP
- * 2024-11-05 section 6.2.2 fallback).
+ * bearerHash. Returns 'relayed' on success; 'no_stream' if no open stream
+ * exists for this bearer in this isolate; 'relay_failed' if an open stream
+ * errored mid-write.
  */
 // Three-valued outcome so callers can distinguish the cross-isolate
 // fallback ("no_stream", the documented 202-fallback trigger) from a

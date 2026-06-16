@@ -6,6 +6,24 @@ DEVLOG at cchurctrip/verity:docs/DEVLOG.md for spec-level context.
 
 ---
 
+## 2026-06-16: POST /sse cross-request I/O crash fix (Sentry 947521a7)
+
+**Branch:** `fix/mcp-sse-cross-request-io` off `main` `2d07ee0` (the deployed release the error fired on).
+
+**Symptom:** unhandled production error `Cannot perform I/O on behalf of a different request (I/O type: RefcountedCanceler)` at `relaySsePostToStream`, env `verity-mcp-production`. Sentry `947521a7d6224351a45a8d504c9245ee`.
+
+**Root cause:** the VRT-165 legacy-SSE bridge stored each `GET /sse` stream writer in a module-scope map and had `POST /sse` write the JSON-RPC response into that writer. The design assumed the only failure mode was 'GET and POST landed on different isolates' (handled by the 202 + inline fallback). But Cloudflare Workers forbid one request handler from performing I/O on a stream created by a **different** request handler. GET and POST are always different requests, so the relay write threw on **every** same-isolate relay (the supposed happy path), and the throw escaped the call-site try/catch. The in-isolate relay was never viable on Workers. Impact was scoped to legacy-SSE clients (Comet, some Gemini surfaces); Streamable-HTTP clients use POST /mcp and were unaffected.
+
+**Fix (minimal mitigation):** removed the cross-request relay from the POST /sse handler. `POST /sse` now always returns the JSON-RPC envelope inline (MCP 2024-11-05 §6.2.2 fallback), which both strict and lenient clients accept. No cross-request I/O remains. `relaySsePostToStream` + the `openStreams` map are retained (write-only, annotated) so the follow-up has the framing + bearer-hash plumbing in place. Existing CI tests already asserted the inline-200 contract; the gated e2e probe + `multi-client-probe.sh` Probe 9 already tolerate 200-or-202, so nothing in CI or the live probes breaks.
+
+- `src/index.ts`: removed the relay block + the `relaySsePostToStream` import; POST /sse returns inline.
+- `src/transport-sse.ts`: annotated `relaySsePostToStream` as retained-not-wired.
+- `tests/transport-sse.test.ts`: retitled the POST /sse describe to the always-inline contract.
+
+**FOLLOW-UP (own story, not yet scheduled): Durable-Object SSE relay.** Restore true server-to-GET-stream delivery via a Durable Object that owns the stream (or migrate to Cloudflare's `agents` SDK `McpAgent`), so GET and POST address the same I/O context. AC: POST /sse response lands as an `event: message` on the same bearer's open GET stream end-to-end; Probe 9 asserts the relayed-on-stream path; no `RefcountedCanceler` under load. First reassess whether the legacy SSE bridge is still needed at all: if Comet/Gemini accept the inline 6.2.2 response in practice, the DO is unnecessary and `relaySsePostToStream` + `openStreams` can simply be deleted. Needs a parent-repo `prd.json` VRT record when scheduled (VRT-167 is taken; pick the next free ID).
+
+---
+
 ## Checkpoint: 2026-05-15 (VRT-146d Sentry environment tag follow-up)
 
 **Active task:** add `environment` tag to Worker's Sentry init so events filter cleanly when the same `SENTRY_DSN` is shared with the main verityskills.com Next.js app. Branch `feat/vrt-146d-sentry-environment-tag` off main `a049f36` (post VRT-146b merge).
