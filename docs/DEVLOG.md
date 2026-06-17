@@ -338,3 +338,15 @@ readBearer from src/auth.ts (merged at d9f77d1) returns the BearerResult discrim
 **Next step if resuming:** Start at step 1 (src/upstream.ts TOOL_ROUTES) per spec Plan section.
 
 **Context:** coordination-heat flips to auth-required because the new coordination-score route is Pro/Fund/Trial-gated (verified at app/api/skills/coordination-score/route.ts on verity origin/main). Tool NAME preserved per B-full. The spec appendix "(anonymous allowed)" label is the stale pre-rename leaderboard probe; brief explicitly routes the tool to the new auth-gated subject scorer. check-manifest-schema.sh is CI-blocking and must be relaxed in the same diff for internal coherence.
+
+---
+
+## VRT-210e — add the notification-prefs tool, 2026-06-16
+
+Seventh MCP tool. Forwards to the parent repo's `/api/mcp/notification-prefs` endpoint (shipped + corrected in cchurctrip/verity #431/#432: same `resolveCallerAuth` caller contract the other tools use, so the OAuth path forwards `x-verity-user-id` + `x-worker-shared-secret`). Tool input `{action:'get'|'set', prefs?}` is forwarded byte-identical as the body.
+
+**Files**: `src/tools/notification-prefs.ts` (new) + `src/tools/index.ts` (TOOLS) + `src/upstream.ts` (TOOL_ROUTES) + `manifest.json` (7th entry) + `scripts/check-manifest-schema.sh` (6→7 + index loop) + count/snapshot updates across `tests/{manifest.snapshot,mcp,health,integration,upstream,e2e/live-contract}.test.ts`. No outputSchema (parse-defensively, like coordination-heat). requiresAuth:true (not anonymous).
+
+**Gates**: 419 tests pass, tsc + eslint clean, manifest-schema OK (tools=7), em-dash clean, `wrangler deploy --dry-run --env preview` builds.
+
+**Deploy**: owner runs `npm run deploy` (= `wrangler deploy --env production`, needs Cloudflare creds) AFTER merge to make the tool live at mcp.verityskills.com. WORKER_SHARED_SECRET already configured. Post-deploy smoke: `RUN_LIVE=1 ... vitest tests/e2e/live-contract.test.ts` covers the new tool's get shape.

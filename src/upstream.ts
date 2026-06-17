@@ -79,12 +79,17 @@ const UPSTREAM_FETCH_TIMEOUT_MS = 30_000;
 // an authenticated key (see src/tools/coordination-heat.ts requiresAuth and
 // manifest.json). It is no longer an anonymous tool.
 export const TOOL_ROUTES = {
-  'coordination-heat': '/api/skills/coordination-score',
-  'verity-score':      '/api/skills/verity-score',
-  'morning-brief':     '/api/skills/morning-brief',
-  'verity-scan':       '/api/skills/verity-scan',
-  'cross-check-alert': '/api/skills/cross-check-claim',
-  'disinfo-alert':     '/api/skills/disinfo-monitor',
+  'coordination-heat':  '/api/skills/coordination-score',
+  'verity-score':       '/api/skills/verity-score',
+  'morning-brief':      '/api/skills/morning-brief',
+  'verity-scan':        '/api/skills/verity-scan',
+  'cross-check-alert':  '/api/skills/cross-check-claim',
+  'disinfo-alert':      '/api/skills/disinfo-monitor',
+  // VRT-210e: account self-management, not a marketed skill route. Forwards to
+  // the parent repo's notification-prefs endpoint, which speaks the same
+  // resolveCallerAuth caller contract (x-verity-user-id + shared secret, or
+  // x-verity-key) the other tools use.
+  'notification-prefs': '/api/mcp/notification-prefs',
 } as const satisfies Record<string, string>;
 
 export type ToolName = keyof typeof TOOL_ROUTES;
@@ -261,7 +266,7 @@ export async function proxyToolCall(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProxyOutcome> {
   // Reject unknown tools first so the kill-switch surface only reflects
-  // the 6 advertised names. Otherwise an attacker probing arbitrary names
+  // the advertised names. Otherwise an attacker probing arbitrary names
   // could distinguish "name in MCP_TOOLS_DISABLED" (-> 503) from "name not
   // in TOOL_ROUTES" (-> -32602) and partially exfiltrate the operator's
   // kill-switch config. Owner kill-switch values are still 6-name-bounded
@@ -336,7 +341,7 @@ export async function proxyToolCall(
 
   // For an absent bearer, the spec is explicit: forward anyway without
   // x-verity-key and let upstream decide the status. Keeps the Worker thin
-  // and single-source-of-auth-truth. All six tools now back authenticated
+  // and single-source-of-auth-truth. All tools now back authenticated
   // operations (the former anonymous coordination rollup was replaced by the
   // authenticated subject scorer), so an absent key forwards with no
   // x-verity-key and upstream returns its own 401. No per-tool special case

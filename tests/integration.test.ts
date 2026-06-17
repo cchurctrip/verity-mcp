@@ -87,7 +87,7 @@ function unwrapToolsCall(body: unknown): { upstream: Record<string, unknown>; is
   };
 }
 
-describe('tools/call: happy path for each of the 6 tools', () => {
+describe('tools/call: happy path for each of the 7 tools', () => {
   // upstreamBody is typed as Record<string, unknown> (not unknown) because
   // fetchMock.reply expects object | string | Buffer for its body parameter.
   // upstreamPath values mirror src/upstream.ts TOOL_ROUTES. Three tools now
@@ -102,6 +102,7 @@ describe('tools/call: happy path for each of the 6 tools', () => {
     { name: 'verity-scan', upstreamPath: '/api/skills/verity-scan', auth: 'Bearer vtk_a', upstreamBody: { verdict: 'clear' } },
     { name: 'cross-check-alert', upstreamPath: '/api/skills/cross-check-claim', auth: 'Bearer vtk_a', upstreamBody: { verdict: 'NO_SIGNAL' } },
     { name: 'disinfo-alert', upstreamPath: '/api/skills/disinfo-monitor', auth: 'Bearer vtk_a', upstreamBody: { detected: false } },
+    { name: 'notification-prefs', upstreamPath: '/api/mcp/notification-prefs', auth: 'Bearer vtk_a', upstreamBody: { subscriptions: {} } },
   ];
 
   it.each(cases)('$name forwards upstream 200 as JSON-RPC result', async (tc) => {
@@ -352,6 +353,6 @@ describe('Sentry.withSentry wrap smoke', () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools).toHaveLength(6);
+    expect(body.result.tools).toHaveLength(7);
   });
 });

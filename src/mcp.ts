@@ -149,7 +149,7 @@ export function buildInitializeResult(): {
 // morning-brief); MCP clients calling tools/list must be able to see those
 // schemas. Earlier versions of this builder stripped outputSchema before
 // serializing, which kept VRT-160's documentation invisible on the wire.
-// The conditional spread keeps tools without outputSchema (currently 3 of 6)
+// The conditional spread keeps tools without outputSchema (currently 3 of 7)
 // emitting the same object shape they emit today.
 export function buildToolsListResult(): {
   tools: Array<{
@@ -262,7 +262,7 @@ export function outcomeToResponse(outcome: ProxyOutcome, id: JsonRpcId): McpResp
       // structuredContent. Symptom we hit 2026-05-27 on verity-score:
       //   "Tool verity-score has an output schema but did not return
       //    structured content"
-      // Three of six tools currently declare outputSchema (verity-score,
+      // Three of the seven tools currently declare outputSchema (verity-score,
       // verity-scan, morning-brief per VRT-160), and others may add it
       // later, so the cheapest correct fix is to ALWAYS populate
       // structuredContent on 2xx forwards when the body is a non-null

@@ -14,6 +14,7 @@ import { morningBrief } from './morning-brief';
 import { verityScan } from './verity-scan';
 import { crossCheckAlert } from './cross-check-alert';
 import { disinfoAlert } from './disinfo-alert';
+import { notificationPrefs } from './notification-prefs';
 
 export interface Tool {
   name: string;
@@ -44,6 +45,7 @@ export const TOOLS = [
   verityScan,
   crossCheckAlert,
   disinfoAlert,
+  notificationPrefs,
 ] as const satisfies readonly Tool[];
 
 // No name-keyed lookup is exported here: the JSON-RPC dispatcher in

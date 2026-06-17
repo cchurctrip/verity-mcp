@@ -79,11 +79,11 @@ describe('Brand Rule #2: src/tools/*.ts descriptions stay free of implementation
 });
 
 describe('Marketplace schema invariants (manifest <-> TOOLS parity)', () => {
-  it('manifest.tools and TOOLS have the same 6 names in the same order', () => {
+  it('manifest.tools and TOOLS have the same 7 names in the same order', () => {
     const manifestNames = manifest.tools.map((t) => t.name);
     const codeNames = TOOLS.map((t) => t.name);
     expect(manifestNames).toEqual(codeNames);
-    expect(manifestNames).toHaveLength(6);
+    expect(manifestNames).toHaveLength(7);
   });
 
   it('manifest.tools[].requires_auth matches TOOLS[].requiresAuth', () => {
@@ -156,6 +156,7 @@ describe('Tool inputSchema invariants (Brand Rule #2 + marketplace contract)', (
       ['verity-scan', ['subject']],
       ['cross-check-alert', ['claim']],
       ['disinfo-alert', ['subject', 'severity_threshold']],
+      ['notification-prefs', ['action']],
     ]);
   });
 
