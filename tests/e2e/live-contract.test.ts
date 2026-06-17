@@ -107,7 +107,7 @@ function expectHasAll(obj: Record<string, unknown> | undefined, keys: readonly s
   }
 }
 
-liveDescribe('live contract: 6 tools vs mcp.verityskills.com', () => {
+liveDescribe('live contract: 7 tools vs mcp.verityskills.com', () => {
   // 1. coordination-heat -> /api/skills/coordination-score (now auth-required).
   it('coordination-heat returns the subject-score shape', async () => {
     const { status, upstream, isError } = await callTool('coordination-heat', { subject: 'GME' }, TEST_KEY);
@@ -215,6 +215,13 @@ liveDescribe('live contract: 6 tools vs mcp.verityskills.com', () => {
       'sources_checked',
       'analyzed_at',
     ]);
+  });
+
+  it('notification-prefs (action:get) returns the subscriptions shape', async () => {
+    const { status, upstream, isError } = await callTool('notification-prefs', { action: 'get' }, TEST_KEY);
+    expect(status).toBe(200);
+    expect(isError).toBe(false);
+    expectHasAll(upstream, ['subscriptions']);
   });
 
   // MCP tools/call response shape regression guard (Claude Desktop smoke

@@ -117,13 +117,14 @@ describe('isToolKillSwitched', () => {
 });
 
 describe('isKnownTool + TOOL_ROUTES', () => {
-  it('TOOL_ROUTES has exactly the 6 spec-named tools', () => {
+  it('TOOL_ROUTES has exactly the 7 spec-named tools', () => {
     const tools = Object.keys(TOOL_ROUTES).sort();
     expect(tools).toEqual([
       'coordination-heat',
       'cross-check-alert',
       'disinfo-alert',
       'morning-brief',
+      'notification-prefs',
       'verity-scan',
       'verity-score',
     ]);
@@ -133,7 +134,8 @@ describe('isKnownTool + TOOL_ROUTES', () => {
   // Three tools forward to the newer marketed operations whose path differs
   // from the tool name. This test pins the exact name -> path map so a
   // routing typo still fails, and asserts every value is a well-formed
-  // /api/skills/<slug> path.
+  // /api/<area>/<slug> path (skills for the marketed tools, mcp for the
+  // account self-management notification-prefs tool).
   it('every tool route maps to its pinned upstream skill path', () => {
     expect(TOOL_ROUTES).toEqual({
       'coordination-heat': '/api/skills/coordination-score',
@@ -142,13 +144,14 @@ describe('isKnownTool + TOOL_ROUTES', () => {
       'verity-scan': '/api/skills/verity-scan',
       'cross-check-alert': '/api/skills/cross-check-claim',
       'disinfo-alert': '/api/skills/disinfo-monitor',
+      'notification-prefs': '/api/mcp/notification-prefs',
     });
     for (const path of Object.values(TOOL_ROUTES)) {
-      expect(path).toMatch(/^\/api\/skills\/[a-z][a-z-]*[a-z]$/);
+      expect(path).toMatch(/^\/api\/(skills|mcp)\/[a-z][a-z-]*[a-z]$/);
     }
   });
 
-  it('isKnownTool returns true for the 6 known tools and false otherwise', () => {
+  it('isKnownTool returns true for the known tools and false otherwise', () => {
     expect(isKnownTool('coordination-heat')).toBe(true);
     expect(isKnownTool('verity-score')).toBe(true);
     expect(isKnownTool('disinfo-alert')).toBe(true);

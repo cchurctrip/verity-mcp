@@ -111,13 +111,13 @@ if [ -n "$UNKNOWN_ANON" ]; then
 fi
 
 TOOLS_COUNT=$(jq -r '.tools | length' "$MANIFEST")
-if [ "$TOOLS_COUNT" != "6" ]; then
-  echo "[manifest-schema] FAIL: tools array must have exactly 6 entries, got $TOOLS_COUNT"
+if [ "$TOOLS_COUNT" != "7" ]; then
+  echo "[manifest-schema] FAIL: tools array must have exactly 7 entries, got $TOOLS_COUNT"
   exit 1
 fi
 
 # Every tool entry must have name, description, requires_auth.
-for i in 0 1 2 3 4 5; do
+for i in 0 1 2 3 4 5 6; do
   for field in name description requires_auth; do
     if ! jq -e ".tools[$i] | has(\"$field\")" "$MANIFEST" >/dev/null; then
       echo "[manifest-schema] FAIL: tools[$i] missing field: $field"

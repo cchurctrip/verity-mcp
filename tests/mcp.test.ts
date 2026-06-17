@@ -146,9 +146,9 @@ describe('buildInitializeResult', () => {
 });
 
 describe('buildToolsListResult', () => {
-  it('returns 6 tools in fixed order', () => {
+  it('returns 7 tools in fixed order', () => {
     const { tools } = buildToolsListResult();
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(7);
     expect(tools.map((t) => t.name)).toEqual([
       'coordination-heat',
       'verity-score',
@@ -156,6 +156,7 @@ describe('buildToolsListResult', () => {
       'verity-scan',
       'cross-check-alert',
       'disinfo-alert',
+      'notification-prefs',
     ]);
   });
 
@@ -186,10 +187,10 @@ describe('buildToolsListResult', () => {
     expect([...withOutputSchema].sort()).toEqual(['morning-brief', 'verity-scan', 'verity-score']);
   });
 
-  it('outputSchema is absent on the 3 tools that did not declare one (no spurious empty object)', () => {
+  it('outputSchema is absent on the 4 tools that did not declare one (no spurious empty object)', () => {
     const { tools } = buildToolsListResult();
     const noOutputSchema = tools.filter((t) => !('outputSchema' in t)).map((t) => t.name);
-    expect([...noOutputSchema].sort()).toEqual(['coordination-heat', 'cross-check-alert', 'disinfo-alert']);
+    expect([...noOutputSchema].sort()).toEqual(['coordination-heat', 'cross-check-alert', 'disinfo-alert', 'notification-prefs']);
   });
 
   it('every outputSchema has `type: "object"` at the ROOT (MCP SDK ToolSchema requires this literal; #25 part 8)', () => {
@@ -529,13 +530,13 @@ describe('handleMcpRequest', () => {
     });
   });
 
-  it('tools/list returns 6 tools and echoes id', async () => {
+  it('tools/list returns 7 tools and echoes id', async () => {
     const req = jsonRequest({ jsonrpc: '2.0', id: 'a', method: 'tools/list', params: {} });
     const r = await handleMcpRequest(req, env);
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ jsonrpc: '2.0', id: 'a' });
     const result = (r.body as { result: { tools: unknown[] } }).result;
-    expect(result.tools).toHaveLength(6);
+    expect(result.tools).toHaveLength(7);
   });
 
   it('unknown method returns -32601 and surfaces the offending method', async () => {

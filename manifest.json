@@ -48,6 +48,11 @@
       "name": "disinfo-alert",
       "description": "Monitor a topic or ticker for disinformation patterns and coordinated narratives.",
       "requires_auth": true
+    },
+    {
+      "name": "notification-prefs",
+      "description": "Read or change which Verity emails you receive, including turning a category back on.",
+      "requires_auth": true
     }
   ],
   "marketing_categories": ["finance", "research", "data"],

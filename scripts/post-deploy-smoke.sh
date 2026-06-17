@@ -2,7 +2,7 @@
 # Post-deploy smoke check for verity-mcp.
 #
 # Run after `wrangler deploy` to confirm the endpoint is healthy, the manifest
-# is reachable, JSON-RPC framing works, and the 6 tools are advertised. This
+# is reachable, JSON-RPC framing works, and the advertised tools are returned. This
 # is the same battery the deploy runbook walks through; bundled into a script
 # so CI / on-call can run it as a single command.
 #
@@ -52,15 +52,19 @@ SERVER_NAME=$(echo "$INIT" | jq -r '.result.serverInfo.name // empty')
 [ "$SERVER_NAME" = "verity-mcp" ] || fail "initialize did not return serverInfo.name=verity-mcp" "$INIT"
 pass "initialize byte-identical to locked contract"
 
-# Check 3: tools/list returns the 6 advertised tools in fixed order
+# Check 3: tools/list returns the advertised tools in fixed order. The expected
+# set is derived from manifest.json (the canonical source the repo already
+# pins) so adding a tool can never reintroduce a hardcoded-count drift here.
 echo "Check 3: POST /mcp tools/list"
+MANIFEST_PATH="$(dirname "$0")/../manifest.json"
+EXPECTED=$(jq -r '.tools[].name' "$MANIFEST_PATH" | tr '\n' ',' | sed 's/,$//')
+EXPECTED_COUNT=$(jq -r '.tools | length' "$MANIFEST_PATH")
 TOOLS=$(curl -sS -m 10 -X POST "$BASE_URL/mcp" \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
 TOOL_NAMES=$(echo "$TOOLS" | jq -r '.result.tools[].name' | tr '\n' ',' | sed 's/,$//')
-EXPECTED="coordination-heat,verity-score,morning-brief,verity-scan,cross-check-alert,disinfo-alert"
 [ "$TOOL_NAMES" = "$EXPECTED" ] || fail "tools/list returned unexpected tool set" "got: $TOOL_NAMES, expected: $EXPECTED"
-pass "tools/list returns 6 tools in fixed order"
+pass "tools/list returns $EXPECTED_COUNT tools in fixed order"
 
 # Check 4: coordination-heat dispatch with no bearer (now auth-required; the
 # upstream returns 401 without a key). We do not assert the upstream body

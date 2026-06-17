@@ -102,7 +102,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
     });
   });
 
-  it('tools/list returns the 6 advertised tools', async () => {
+  it('tools/list returns the 7 advertised tools', async () => {
     const res = await SELF.fetch('http://example.com/mcp', {
       method: 'POST',
       headers: AUTHED,
@@ -110,7 +110,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result?: { tools?: Array<{ name: string }> } };
-    expect(body.result?.tools).toHaveLength(6);
+    expect(body.result?.tools).toHaveLength(7);
     expect(body.result?.tools?.map((t) => t.name)).toEqual([
       'coordination-heat',
       'verity-score',
@@ -118,6 +118,7 @@ describe('POST /mcp dispatch (formerly 501 stub)', () => {
       'verity-scan',
       'cross-check-alert',
       'disinfo-alert',
+      'notification-prefs',
     ]);
   });
 
