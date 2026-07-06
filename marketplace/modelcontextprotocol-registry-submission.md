@@ -1,4 +1,7 @@
-# modelcontextprotocol registry submission walkthrough - READY FOR OWNER EXECUTION (rewritten 2026-07-06)
+# modelcontextprotocol registry submission - PUBLISHED 2026-07-06
+
+> **Live**: `io.github.cchurctrip/verity` v1.0.0 published to https://registry.modelcontextprotocol.io on 2026-07-06 (owner-confirmed, GitHub auth). Verify: `curl -s "https://registry.modelcontextprotocol.io/v0.1/servers?search=verity"`. The registry caps `description` at 100 chars; the published description is the first sentence of the approved long-description copy (97 chars). Updates: bump `version` in `marketplace/server.json` and rerun `mcp-publisher login github` + `mcp-publisher publish`.
+> Namespace note: the "verity" search on the registry also returns com.verityrms/rms-mcp (Verity RMS, investment research), a fact-checking io.github.Clawdio777/verity, and io.github.meloliva14/verity-mcp (trust gate). Crowded name; the description leads with the differentiator.
 
 > **This walkthrough was rewritten on 2026-07-06.** The original draft described a fork-and-PR flow adding `servers/community/verity.yaml`. That flow no longer exists. The official MCP Registry is now an API-driven service at https://registry.modelcontextprotocol.io, published to via the `mcp-publisher` CLI with a `server.json` descriptor. Registry entries live in the registry database, not in the GitHub repo. Docs: https://github.com/modelcontextprotocol/registry/tree/main/docs/modelcontextprotocol-io
 

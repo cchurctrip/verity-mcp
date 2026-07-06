@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cchurctrip/verity",
   "title": "Verity",
-  "description": "Real-time social media and prediction market integrity layer. Tools for AI workflows: integrity scoring, pre-trade scans, cross-reference checks, coordinated-narrative detection, daily watchlist briefs, coordination heat, and notification preferences. Bearer-token auth, seven-day trial without credit card.",
+  "description": "Real-time social media and prediction market integrity layer for traders, funds, and quant desks.",
   "repository": {
     "url": "https://github.com/cchurctrip/verity-mcp",
     "source": "github"
