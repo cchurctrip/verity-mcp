@@ -66,7 +66,11 @@ Once accepted, end users add Verity through Cursor's MCP UI:
 - [x] Same Verity tier-page parity check as Smithery (Retail $49, Pro $149, Fund $499 on verityskills.com/pricing). Verified 2026-07-06.
 - [ ] `support@verityskills.com` inbox configured.
 - [ ] Live-contract evidence is RED: nightly `live-contract-e2e` has never passed (dead `VERITY_MCP_TEST_KEY` since 2026-05-21). Cursor editorial installs and runs the tools themselves; submit only after a green nightly proves the end-to-end path.
-- [ ] An "Install in Cursor" deep-link can be generated; Cursor's editorial team usually wants the deep link in the submission form. Format: `cursor://mcp/install?config=<url-encoded-json>`. Generate via the Cursor MCP installer page.
+- [x] "Install in Cursor" deep link generated (2026-07-06; base64 config per the anysphere.cursor-deeplink scheme; user replaces vtk_YOUR_KEY_HERE after install):
+  ```
+  cursor://anysphere.cursor-deeplink/mcp/install?name=verity&config=eyJ1cmwiOiAiaHR0cHM6Ly9tY3AudmVyaXR5c2tpbGxzLmNvbS9tY3AiLCAiaGVhZGVycyI6IHsiQXV0aG9yaXphdGlvbiI6ICJCZWFyZXIgdnRrX1lPVVJfS0VZX0hFUkUifX0=
+  ```
+  Validate it opens the install prompt in a local Cursor before pasting into the submission form.
 - [ ] Verify a Cursor install actually works end-to-end (the user-side install steps above) before submitting. The editorial team will repeat this; if it does not work for them, listing gets rejected. The probe-script transcript from VRT-155 Step (b) is the proof artifact.
 
 ## Rollback procedure
