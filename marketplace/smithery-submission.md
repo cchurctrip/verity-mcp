@@ -26,9 +26,10 @@ Smithery (https://smithery.ai) is a registry-driven MCP marketplace. Listings ar
 name: verity-mcp
 version: 1.0.0
 description: |
-  Real-time social media and prediction market integrity layer. Six tools for AI
+  Real-time social media and prediction market integrity layer. Tools for AI
   workflows: integrity scoring, pre-trade scans, cross-reference checks,
-  coordinated-narrative detection, daily watchlist briefs, and coordination heat.
+  coordinated-narrative detection, daily watchlist briefs, coordination heat,
+  and notification preferences.
 
 # Auth: every tool except no-key verity-score (degraded path) requires a vtk_*
 # bearer token from https://verityskills.com/account/api-keys.
@@ -43,9 +44,9 @@ authentication:
     invocation_cap: 10
     requires_credit_card: false
 
-# Transport: HTTP POST + JSON-RPC 2.0 today. SSE is a stub returning
-# JSON-RPC -32601 (Method not found); will be implemented in a follow-up
-# (track at https://github.com/cchurctrip/verity-mcp/issues - file pending).
+# Transport: both live post VRT-165. POST /mcp speaks Streamable HTTP
+# (SSE-framed when Accept: text/event-stream, plain JSON otherwise).
+# GET/POST /sse is the legacy EventSource bridge for older clients.
 transport:
   type: http
   endpoint: https://mcp.verityskills.com/mcp
@@ -100,7 +101,10 @@ links:
 
 - [x] Multi-client transport implemented (VRT-165). Both POST `/mcp` Streamable HTTP (Accept-gated SSE framing) and GET/POST `/sse` legacy bridge are live. Smithery's auto-test that probes either transport will pass.
 - [ ] Support email `support@verityskills.com` does not exist yet. Set up Cloudflare Email Routing → forward to your live inbox before going live.
-- [ ] Verity tier pages on verityskills.com/pricing must match the pricing block above (Retail $49, Pro $149, Fund $499). Verify before publishing.
+- [x] Verity tier pages on verityskills.com/pricing must match the pricing block above (Retail $49, Pro $149, Fund $499). Verified 2026-07-06.
+- [ ] `tools/list` on the live Worker now REQUIRES auth (returns `AUTHENTICATION_REQUIRED` without a bearer). Smithery auto-discovers tool schemas via `tools/list`; if its scanner probes unauthenticated the discovery step fails and the listing shows zero tools. Either confirm Smithery's scanner supports auth-gated discovery, or allow anonymous `tools/list` on the Worker (tool schemas are not secret; calls stay auth-gated). Decide before submitting.
+- [ ] Live-contract evidence is RED: nightly `live-contract-e2e` has never passed (dead `VERITY_MCP_TEST_KEY` since 2026-05-21). Rotate the secret and get one green run first.
+- [ ] The server exposes SEVEN tools now (notification-prefs added in VRT-210e). Listing copy in this doc and `marketplace/copy/` still says six (the six detection skills). Owner call on copy wording; brand rules forbid agent-written copy.
 
 ## Rollback procedure
 

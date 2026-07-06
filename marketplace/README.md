@@ -8,15 +8,15 @@ This directory holds the per-registry submission packages for Verity's MCP serve
 2. **Cursor Directory** - https://cursor.com/directory - curated discovery surface inside Cursor.
 3. **modelcontextprotocol/registry** - https://github.com/modelcontextprotocol/registry - the canonical Anthropic-maintained registry. PR-based submission.
 
-## Pre-publish checklist (run once, applies to all 3)
+## Pre-publish checklist (run once, applies to all 3) - statuses as of 2026-07-06
 
-1. [ ] `mcp.verityskills.com/health` returns 200 with a real (non-`"unknown"`) commit SHA after deploy.
-2. [ ] `tools/list` returns 6 tools, all `requiresAuth: true`, with the 3 VRT-160 tools surfacing `outputSchema`.
-3. [ ] Live 6-tool probe with a real `vtk_*` key returns 9/9 pass (`scripts/verity-mcp-live-probe.sh` in the verity repo).
-4. [ ] Scheduled `live-contract-e2e` workflow has run at least one successful nightly pass since the latest deploy. Secret `VERITY_MCP_TEST_KEY` is set on `cchurctrip/verity-mcp`.
-5. [ ] `THREAT_MODEL.md` exists and lists the bearer-auth-proxy STRIDE entries (deferred to VRT-146b; required before public listing).
-6. [ ] Pricing page on `verityskills.com/pricing` is current (registries may auto-pull this).
-7. [ ] Docs page on `verityskills.com/skills` lists each tool with a one-paragraph natural-language usage example.
+1. [x] `mcp.verityskills.com/health` returns 200 with a real (non-`"unknown"`) commit SHA after deploy. Verified 2026-07-06: 200, commit `b70ddca`, kill switch off.
+2. [ ] `tools/list` returns 7 tools (6 skills + notification-prefs, VRT-210e), all `requiresAuth: true`, with the 3 VRT-160 tools surfacing `outputSchema`. BLOCKED for anonymous callers: the Worker now auth-gates `tools/list` (returns `AUTHENTICATION_REQUIRED`). Verify with a valid key, and decide whether anonymous tools/list should be allowed for marketplace scanners (see Smithery doc blocker).
+3. [ ] Live 7-tool probe with a real `vtk_*` key passes (`scripts/verity-mcp-live-probe.sh` in the verity repo). BLOCKED: no working test key (see item 4).
+4. [ ] Scheduled `live-contract-e2e` workflow has run at least one successful nightly pass since the latest deploy. RED since at least 2026-05-28 (every visible run fails 7/22 with 401/403/404 on all authenticated tool calls). Root cause found 2026-07-06: `VERITY_MCP_TEST_KEY` (set once, 2026-05-21) hashes to no active account key; the vrt-149g eval fixture is deactivated and its key does not match either. Fix: mint a key for a dedicated fund-tier smoke account (all email opt-outs set), update the repo secret, dispatch the workflow.
+5. [x] `THREAT_MODEL.md` exists at the repo root with the bearer-auth-proxy STRIDE entries.
+6. [x] Pricing page on `verityskills.com/pricing` is current: $49 / $149 / $499 verified 2026-07-06.
+7. [ ] Docs page on `verityskills.com/skills` lists each tool with a one-paragraph natural-language usage example. Page returns 200; per-tool content check pending.
 8. [x] Multi-client transport implemented (VRT-165). POST `/mcp` content-negotiates: Streamable HTTP (SSE-framed) when `Accept: text/event-stream`, otherwise application/json (preserves the Cursor + synthetic-smoke contract). Legacy SSE bridge at GET `/sse` + POST `/sse` for clients that need EventSource handshake (Perplexity Comet today). `manifest.json` advertises both via a `transports` array root field; the legacy `transport: "http+sse"` single-string remains for marketplace consumers that read the older shape.
 
 ## Assets that go in every submission
@@ -43,7 +43,7 @@ marketplace/
 
 ## Order of publishing (recommended)
 
-1. **modelcontextprotocol/registry first.** It is the canonical source-of-truth and the lowest-traffic surface for early-warning bug surfacing. If something breaks (manifest schema rejection, transport mismatch, bad description), it surfaces in PR review on a public GitHub thread, not in customer-facing surface area.
+1. **modelcontextprotocol registry first.** It is the canonical source-of-truth and the lowest-traffic surface for early-warning bug surfacing. Note (2026-07-06): submission is no longer PR-based; it is an instant API publish via the `mcp-publisher` CLI, so there is no review-queue safety net. Schema validation happens at publish time. See the rewritten walkthrough in `modelcontextprotocol-registry-submission.md`.
 2. **Smithery second.** Smithery auto-pulls from a manifest; if your registry entry is solid, Smithery onboarding is near-zero-effort.
 3. **Cursor Directory third.** Highest-leverage end-user surface (Cursor power users are the closest match to Verity's target audience), but slowest editorial cycle. Saving for last gives the longest field-test window.
 
