@@ -35,6 +35,10 @@ export default defineConfig({
           name: 'e2e',
           environment: 'node',
           include: ['tests/e2e/**/*.test.ts'],
+          // Live tool calls traverse the Worker to upstream skill routes,
+          // several of which run an LLM pass. Observed latencies reach 5s+,
+          // which breaches the 5s vitest default and fails healthy runs.
+          testTimeout: 30_000,
         },
       },
     ],

@@ -1,0 +1,71 @@
+# Smithery server descriptor. Indexed at https://smithery.ai/server/verity-mcp
+# once the listing is claimed from the Smithery dashboard (owner step; this
+# file is inert until then).
+# Source of truth for tool schemas is the live server's tools/list response.
+# This file gives Smithery the discovery hints it needs before it can probe.
+
+name: verity-mcp
+version: 1.0.0
+description: |
+  Real-time social media and prediction market integrity layer. Tools for AI
+  workflows: integrity scoring, pre-trade scans, cross-reference checks,
+  coordinated-narrative detection, daily watchlist briefs, coordination heat,
+  and notification preferences.
+
+# Auth: every tool requires a vtk_* bearer token from
+# https://verityskills.com/account/api-keys (or the OAuth flow at
+# https://mcp.verityskills.com/authorize).
+authentication:
+  type: bearer
+  header: Authorization
+  scheme: Bearer
+  obtain_url: https://verityskills.com/account/api-keys
+  trial:
+    available: true
+    duration_days: 7
+    invocation_cap: 10
+    requires_credit_card: false
+
+# Transport: both live post VRT-165. POST /mcp speaks Streamable HTTP
+# (SSE-framed when Accept: text/event-stream, plain JSON otherwise).
+# GET/POST /sse is the legacy EventSource bridge for older clients.
+transport:
+  type: http
+  endpoint: https://mcp.verityskills.com/mcp
+  method: POST
+
+# Health probe Smithery hits to verify the server is alive on every poll.
+health:
+  url: https://mcp.verityskills.com/health
+  method: GET
+  expected_status: 200
+  expected_field:
+    name: status
+    value: ok
+
+# Tools are auto-discovered via tools/list (auth required). This block is
+# informational.
+tools_url: https://mcp.verityskills.com/mcp
+
+# Pricing summary surfaced on the listing card.
+pricing:
+  free:
+    tier: Trial
+    duration: 7 days
+    invocation_cap: 10
+  paid:
+    - tier: Retail
+      monthly_usd: 49
+    - tier: Pro
+      monthly_usd: 149
+      includes_api_access: true
+    - tier: Fund
+      monthly_usd: 499
+      includes_api_access: true
+      includes_compliance_exports: true
+
+links:
+  homepage: https://verityskills.com
+  docs: https://verityskills.com/skills
+  account: https://verityskills.com/account
+  support: support@verityskills.com   # TODO: configure inbox alias before going live
