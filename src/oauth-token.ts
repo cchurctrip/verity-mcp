@@ -530,6 +530,7 @@ async function mintTokenPair(
     expires_at: accessExpires,
   });
   if (accessIns.kind !== 'ok') {
+    if (isFencedInstallation(accessIns)) return fencedGrant();
     return errorResponse('server_error', `access insert failed: ${describe(accessIns)}`, 500);
   }
 
@@ -543,6 +544,8 @@ async function mintTokenPair(
     expires_at: refreshExpires,
   });
   if (refreshIns.kind !== 'ok') {
+    // The access row may already exist; it is never returned, and the admin revoke's second pass removes it.
+    if (isFencedInstallation(refreshIns)) return fencedGrant();
     return errorResponse('server_error', `refresh insert failed: ${describe(refreshIns)}`, 500);
   }
 
@@ -569,6 +572,27 @@ function errorResponse(
     status,
     ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
   };
+}
+
+/**
+ * VRT-968: since migration 181 in the parent repo, a token insert for an installation an admin revoked is refused in the
+ * database with SQLSTATE VR962, which PostgREST answers as HTTP 400 with `{"code":"VR962",...}` (measured against a real
+ * PostgREST, 2026-09-29; an unfenced insert on the same table answers 201). That is a revoked grant, not a server fault, so
+ * the client gets `invalid_grant` and re-authorises on the first answer instead of retrying a 500.
+ * Matched on the SQLSTATE in the body, never on the status alone: other 400s (a bad column, a CHECK) stay server_error.
+ */
+export function isFencedInstallation(result: { kind: string; status?: unknown; body?: unknown }): boolean {
+  if (result.kind !== 'http_error' || result.status !== 400 || typeof result.body !== 'string') return false;
+  try {
+    const parsed = JSON.parse(result.body) as { code?: unknown };
+    return parsed !== null && typeof parsed === 'object' && parsed.code === 'VR962';
+  } catch {
+    return false;
+  }
+}
+
+function fencedGrant(): OauthTokenResponse {
+  return errorResponse('invalid_grant', 'this connection was revoked; connect again to continue', 400);
 }
 
 function describe(result: { kind: string } & Record<string, unknown>): string {

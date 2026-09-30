@@ -434,6 +434,49 @@ describe('handleOauthToken authorization_code grant', () => {
   });
 });
 
+describe('VRT-968: a fenced installation (SQLSTATE VR962) answers invalid_grant, not a 500', () => {
+  // The body PostgREST returns for the migration-181 trigger, measured against a real PostgREST 2026-09-29.
+  const FENCED = { code: 'VR962', details: null, hint: null, message: 'oauth installation revoked' };
+
+  it('access insert fenced: invalid_grant 400, no tokens, no refresh insert attempted', async () => {
+    const { res, calls } = await runHappyPathAuthorizationCode({ access: { status: 400, body: FENCED } });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'invalid_grant', error_description: 'this connection was revoked; connect again to continue' });
+    expect(calls.some((c) => c.url.includes('/rest/v1/mcp_oauth_refresh_tokens'))).toBe(false);
+  });
+
+  it('refresh insert fenced (revoke landed between the two inserts): invalid_grant, and the access token is not returned', async () => {
+    const { res } = await runHappyPathAuthorizationCode({ refresh: { status: 400, body: FENCED } });
+    expect(res.status).toBe(400);
+    expect((res.body as Record<string, unknown>).error).toBe('invalid_grant');
+    expect(JSON.stringify(res.body)).not.toContain('vto_');
+  });
+
+  it('any other insert failure is still server_error 500 (a different 400, a 500, a non-JSON body)', async () => {
+    for (const access of [
+      { status: 400, body: { code: '23514', message: 'check violation' } },
+      { status: 500, body: { code: 'VR962' } },
+      { status: 409, body: { code: '23505' } },
+    ]) {
+      const { res } = await runHappyPathAuthorizationCode({ access });
+      expect(res.status).toBe(500);
+      expect((res.body as Record<string, unknown>).error).toBe('server_error');
+    }
+  });
+});
+
+describe('isFencedInstallation (VRT-968)', () => {
+  it('only an http_error 400 whose JSON body carries code VR962', async () => {
+    const { isFencedInstallation } = await import('../src/oauth-token');
+    expect(isFencedInstallation({ kind: 'http_error', status: 400, body: '{"code":"VR962"}' })).toBe(true);
+    expect(isFencedInstallation({ kind: 'http_error', status: 400, body: 'not json VR962' })).toBe(false);
+    expect(isFencedInstallation({ kind: 'http_error', status: 400, body: 'null' })).toBe(false);
+    expect(isFencedInstallation({ kind: 'http_error', status: 403, body: '{"code":"VR962"}' })).toBe(false);
+    expect(isFencedInstallation({ kind: 'network_error' })).toBe(false);
+    expect(isFencedInstallation({ kind: 'ok' })).toBe(false);
+  });
+});
+
 describe('handleOauthToken /oauth/token per-code rate limit (arch review R8 test 1)', () => {
   it('returns 429 on the 11th rapid request for the same code', async () => {
     // We do not need DB responses here: the rate-limit gate fires BEFORE
@@ -719,7 +762,10 @@ describe('handleOauthToken refresh_token grant', () => {
 
 // ----------------- helpers used across the happy-path tests -----------------
 
-async function runHappyPathAuthorizationCode(): Promise<{
+async function runHappyPathAuthorizationCode(inserts: {
+  access?: { status: number; body: unknown };
+  refresh?: { status: number; body: unknown };
+} = {}): Promise<{
   res: Awaited<ReturnType<typeof handleOauthToken>>;
   calls: FetchCall[];
 }> {
@@ -746,9 +792,9 @@ async function runHappyPathAuthorizationCode(): Promise<{
     // 2. PATCH code mark used
     { matchUrl: '/rest/v1/mcp_oauth_codes?code_hash=eq.', status: 200, body: [codeRow] },
     // 3. POST access token insert
-    { matchUrl: '/rest/v1/mcp_oauth_tokens', status: 201, body: [{}] },
+    { matchUrl: '/rest/v1/mcp_oauth_tokens', status: inserts.access?.status ?? 201, body: inserts.access?.body ?? [{}] },
     // 4. POST refresh token insert
-    { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens', status: 201, body: [{}] },
+    { matchUrl: '/rest/v1/mcp_oauth_refresh_tokens', status: inserts.refresh?.status ?? 201, body: inserts.refresh?.body ?? [{}] },
   ]);
 
   const res = await handleOauthToken(
