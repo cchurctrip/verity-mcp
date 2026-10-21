@@ -121,15 +121,21 @@ liveDescribe('live contract: 7 tools vs mcp.verityskills.com', () => {
     // `note` field belonged to the leaderboard route, which the Worker no
     // longer targets. The subject scorer never emits a `note` field, so we
     // assert its stable key set instead.
-    expectHasAll(upstream, [
-      'subject',
-      'score',
-      'band',
-      'summary',
-      'signals_found',
-      'sources_checked',
-      'window_hours',
-    ]);
+    //
+    // A quiet lookback window is a legitimate 200: the scorer answers
+    // { subject, status: 'insufficient_data', summary, signals_found,
+    // sources_checked, window_hours } with NO score/band rather than
+    // fabricating a zero. Both shapes are part of the contract a
+    // marketplace consumer sees, so the test accepts either; scored
+    // windows still pin the full scored key set.
+    const sharedKeys = ['subject', 'summary', 'signals_found', 'sources_checked', 'window_hours'] as const;
+    if (upstream && upstream['status'] === 'insufficient_data') {
+      expectHasAll(upstream, sharedKeys);
+      expect(upstream, 'insufficient_data never carries a score').not.toHaveProperty('score');
+      expect(upstream, 'insufficient_data never carries a band').not.toHaveProperty('band');
+    } else {
+      expectHasAll(upstream, [...sharedKeys, 'score', 'band']);
+    }
     expect(upstream, 'subject scorer never emits a note field').not.toHaveProperty('note');
   });
 

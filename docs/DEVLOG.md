@@ -350,3 +350,34 @@ Seventh MCP tool. Forwards to the parent repo's `/api/mcp/notification-prefs` en
 **Gates**: 419 tests pass, tsc + eslint clean, manifest-schema OK (tools=7), em-dash clean, `wrangler deploy --dry-run --env preview` builds.
 
 **Deploy**: owner runs `npm run deploy` (= `wrangler deploy --env production`, needs Cloudflare creds) AFTER merge to make the tool live at mcp.verityskills.com. WORKER_SHARED_SECRET already configured. Post-deploy smoke: `RUN_LIVE=1 ... vitest tests/e2e/live-contract.test.ts` covers the new tool's get shape.
+
+---
+
+## ⚠️ Context Watchdog Checkpoint — 2026-06-17 11:22 (turn 9353)
+
+**Trigger:** Automatic — context window approaching limit
+**Session:** unknown
+**Working directory:** /Users/autopilotventures/workspace/verity-mcp
+
+**Status:** HARD — start new session now
+**ACTION REQUIRED:** Open a new Claude Code session. Say: "Read DEVLOG and propose plan."
+
+**To resume in a new session:**
+1. Open new Claude Code terminal in: `/Users/autopilotventures/workspace/verity-mcp`
+2. Say: "Read DEVLOG and propose plan."
+3. Claude will restate the last checkpoint and ask for confirmation
+
+**Note:** Check the most recent non-watchdog checkpoint above for the active task spec.
+
+---
+
+## VRT-148 marketplace prep + live-contract rescue - 2026-07-06
+
+**What**: Marketplace submission docs truthed-up; live-contract e2e restored to green after 5+ weeks of silent red.
+
+- Root cause of the never-green nightly: `VERITY_MCP_TEST_KEY` (set once 2026-05-21) hashed to no active verity_users key. Fixed by minting a dedicated fund-tier smoke account (cchurch+mcpe2e@c2mci.com, all email opt-outs on) and rotating the repo secret. Local suite: 22/22.
+- `modelcontextprotocol-registry-submission.md` REWRITTEN: the registry dropped the fork-and-PR YAML flow; it is now an instant API publish via `mcp-publisher` CLI + `server.json`. Ready-to-publish `marketplace/server.json` added (remote server, streamable-http /mcp + sse /sse, GitHub-auth namespace io.github.cchurctrip/verity).
+- coordination-heat test now accepts the documented `insufficient_data` shape (quiet window, no fabricated zero) alongside the scored shape; e2e project got `testTimeout: 30_000` (LLM-backed calls breach the 5s vitest default).
+- Checklist deltas: pricing parity verified, THREAT_MODEL present, /health pinned. Open: support inbox, icon, anonymous tools/list decision (Worker auth-gates it since OAuth; probe 8 of the verity-repo live probe now fails by design change), copy still says six tools (seven live).
+
+**Gates**: 419 workers tests + 22/22 live e2e pass locally; tsc + eslint clean; marketplace files em-dash clean.
