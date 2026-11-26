@@ -28,10 +28,10 @@ jobs:
     name: OSV scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: OSV-Scanner
         continue-on-error: true
-        uses: google/osv-scanner-action/osv-scanner-action@v2.0.0
+        uses: google/osv-scanner-action/osv-scanner-action@32d3cd482bdadfb38b186c0ad1b031902d55d932 # v2.7.1
         with:
           scan-args: |-
             --lockfile=package-lock.json
@@ -40,7 +40,7 @@ jobs:
       - name: Upload SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3
         with:
           sarif_file: osv.sarif
           category: osv-scanner
